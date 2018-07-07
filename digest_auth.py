@@ -9,8 +9,8 @@ import binascii
 import time
 
 from .digest_auth_funcs import random_value, hash_algorithms, compute_digest
-
 from .auth_core import BaseAuthenticator
+from .auth_http_header import parse_csv_string
 
 NonceSession = collections.namedtuple('NonceSession',
                                       ['nonce', 'algo', 'used_nc', 'nc_max', 'endtime'])
@@ -53,12 +53,13 @@ class NonceCache:
         del self.dic[k]
 
 class DigestAuthenticator(BaseAuthenticator):
-    def __init__(self, algo, realm, checkerdic, idwrap=str, cache_params={}):
+    def __init__(self, algo, realm, checkerdic, idwrap=str, qops=['auth'], cache_params={}):
         super().__init__('Digest')
         self.algo = algo.lower()
         self.dic = checkerdic
         self.realm = realm
         self.idwrap = idwrap
+        self.qops = qops
         self.nonce_cache = NonceCache(cache_params, algo=self.algo)
         self.opaque = random_value(64)
 
@@ -69,8 +70,6 @@ class DigestAuthenticator(BaseAuthenticator):
         if '' in v:
             return False
         
-        # how to pass stale?
-
         try:
             username = v['username']
             realm = v['realm']
@@ -116,26 +115,34 @@ class DigestAuthenticator(BaseAuthenticator):
             return False, {'stale': True}
 
         session.used_nc.add(nc)
-        
-        if (qop != 'auth'):
-            return False, sessk  #flask.abort(400) # unimplemented
+
+        if (qop not in self.qops):
+            return False
+
+        if qop == 'auth-int':
+            body = request.data
+        else:
+            body = None
+        #print ("@@@ body = {!r}".format(body))
 
         try:
             response_computed, rspauth = compute_digest(
                 self.algo, username=username, realm=realm,
                 password=self.dic[username],
                 method=request.method, url=request_url,
-                nonce=nonce, nc=nc, cnonce=cnonce, qop=qop)
+                nonce=nonce, nc=nc, cnonce=cnonce,
+                qop=qop, req_body=body)
         except ValueError:
             # decoding failure
             return False
 
-        #        print("AUTH: computed={}, given={}".format(response_computed, response))
+        # print("AUTH: computed={}, given={}".format(response_computed, response))
         
         if response.lower() != response_computed:
             return False, sessk
 
         sessk['rspauth'] = rspauth
+        sessk['qop'] = qop
         sessk['cnonce'] = cnonce
         sessk['nc'] = nc
 
@@ -149,7 +156,7 @@ class DigestAuthenticator(BaseAuthenticator):
         else:
             session = self.nonce_cache.new_nonce()
         h = {'realm': self.realm,
-             'qop': 'auth',
+             'qop': ", ".join(self.qops),
              'algorithm': session.algo,
              'nonce': session.nonce,
              'opaque': self.opaque,
@@ -159,12 +166,25 @@ class DigestAuthenticator(BaseAuthenticator):
 #        print("GENERATE_CHALLENGE: {!r}".format(h))
         return [('Digest', h)]
 
-    def generate_auth_info(self, sessk):
+    def generate_auth_info(self, sessk, response):
         h, sess_mode, _p = hash_algorithms[self.algo]
 #        print("GENERATE_AUTHINFO: {!r}".format(sessk))
-        
-        h = {'rspauth': sessk['rspauth'],
-             'qop': 'auth',
+
+        if(sessk['qop'] == 'auth-int'):
+            response.make_sequence()
+            body_iter = response.iter_encoded()
+            m = h()
+            s = b''
+            for b in body_iter:
+                m.update(b)
+                s += b
+            # print ("@@@ RESPONSEBODY = {}".format(s))
+            bodyhash = binascii.hexlify(m.digest())
+        else:
+            bodyhash = None
+
+        h = {'rspauth': sessk['rspauth'](bodyhash),
+             'qop': sessk['qop'],
              'cnonce': sessk['cnonce'],
              'nc': sessk['nc']}
 

@@ -99,9 +99,9 @@ class CombinedAuthenticator(BaseAuthenticator):
             r.extend(h[0].generate_challenge[h[1]])
         return r
 
-    def generate_auth_info(self, hdr):
+    def generate_auth_info(self, hdr, resp):
         if hdr:
             (authn, hdr) = hdr
-            return authn.generate_auth_info(hdr)
+            return authn.generate_auth_info(hdr, resp)
         else:
             return {}

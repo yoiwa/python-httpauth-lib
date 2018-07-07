@@ -37,7 +37,7 @@ class BaseAuthenticator:
         """
         return []
 
-    def generate_auth_info(self, hdr):
+    def generate_auth_info(self, hdr, resp):
         """
         Passed the second return value of check_auth, return a hash
         representing 'Authentication-Info' header.
@@ -101,11 +101,10 @@ class BaseAuthorization:
 
     def wrap_result(self, rv, hdr):
         if hdr:
-            h = self.authenticator.generate_auth_info(hdr)
-            if h == {}:
-                return rv
             r = flask.make_response(rv)
-            r.headers['Authentication-Info'] = encode_http7615_authinfo(h)
+            h = self.authenticator.generate_auth_info(hdr, r)
+            if h != {}:
+                r.headers['Authentication-Info'] = encode_http7615_authinfo(h)
             return r
         else:
             return rv

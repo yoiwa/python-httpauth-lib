@@ -274,6 +274,9 @@ def encode_http7615_authinfo(pl):
         po.append("{}={}".format(*encode_param_val('digest', k, v))) # TODO
     return ", ".join(po)
 
+def parse_csv_string(s):
+    return [x for x in (x.strip() for x in s.split(',')) if x != '']
+
 if __name__=='__main__':
 #    print(repr(parse_http7615_header(r'Digest foo=bar, roo="var abc\"k\a", Basic agnofo1_/= , Mutual foo=bar, roo="vari", Mutual foo=2, var="xx"')))
 #    print(repr(parse_http7615_header(r', Digest foo=bar, , roo="var abc\"k\a", , Basic agnofo1_/=  , , mutual , Foo=bar, ,, roo="vari", , Mutual foo=2, , var="xx", , , ')))

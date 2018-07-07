@@ -8,12 +8,16 @@ import sys
 import re
 import binascii
 import threading
+from requests.exceptions import ContentDecodingError, RequestsWarning
+from warnings import warn
 from copy import copy
 
-from digest_auth_funcs import random_value, hash_algorithms, compute_digest
-from auth_http_header import encode_http7615_header, parse_http7615_header, parse_http7615_authinfo
+from .digest_auth_funcs import random_value, hash_algorithms, compute_digest, hash
+from .auth_http_header import encode_http7615_header, parse_http7615_header, parse_http7615_authinfo, parse_csv_string
 import requests
 import requests.cookies
+
+LastReq = collections.namedtuple('LastReq', ['nc', 'c_resp', 'qop', 'respauth'])
 
 class DigestClientSession:
     __slots__ = ['algorithm', 'qop', 'realm', 'nonce', 'nc', 'cnonce', 'opaque', 'last_req']
@@ -32,11 +36,21 @@ class DigestAuth2(requests.auth.AuthBase):
     #  - support for "nextnonce" and "stale" flags.
     #  - more rigid rfc7615 header parsing,
 
-    def __init__(self, username, password):
+    def __init__(self, username, password, qops=['auth'], realm=None, strict_auth=True):
         self.username = username
         self.password = password
+        self.realm = realm
+        self.qops = qops
+        self.strict_auth = strict_auth
         self._tls = threading.local()
         self._initialize_tls()
+
+    def choose_qop(self, qop_header):
+        l = parse_csv_string(qop_header)
+        for q in self.qops:
+            if q in l:
+                return q
+        return None
 
     def _initialize_tls(self):
         pass
@@ -53,11 +67,17 @@ class DigestAuth2(requests.auth.AuthBase):
             session.nc += 1
 
             nc_str = "%08x" % session.nc
+
+            if session.qop == 'auth-int':
+                req_body = r.body or b''
+            else:
+                req_body = None
+
             c_resp, respauth = compute_digest(
                 session.algorithm, username=self.username, realm=session.realm,
                 password=self.password, method=r.method, url=url,
                 nonce=session.nonce, nc=nc_str, cnonce=session.cnonce,
-                qop=session.qop)
+                qop=session.qop, req_body=req_body)
             h = encode_http7615_header(
                 [('Digest',
                   { 'algorithm': session.algorithm,
@@ -71,7 +91,10 @@ class DigestAuth2(requests.auth.AuthBase):
                     'opaque': session.opaque,
                     'response': c_resp,
             })])
-            session.last_req=(session.nc, c_resp, respauth)
+            session.last_req = LastReq(nc = session.nc,
+                                       c_resp = c_resp,
+                                       qop = session.qop,
+                                       respauth = respauth)
             #print("@@@ added  header Authorization: {}".format(h))
             r.headers['Authorization'] = h
         else:
@@ -139,6 +162,7 @@ class DigestAuth2(requests.auth.AuthBase):
                 if c != 'Digest': continue
                 algo = kv.get('algorithm', None)
                 if not algo or algo not in hash_algorithms: continue
+                if self.realm and kv.get('realm', None) != self.realm: continue
                 (_h, _s, p) = hash_algorithms[algo]
                 if p > prec:
                     prec, challenge = p, kv
@@ -186,7 +210,7 @@ class DigestAuth2(requests.auth.AuthBase):
         if challenge:
             try:
                 s.algorithm = challenge['algorithm']
-                s.qop = challenge['qop'] ### FIXIT
+                s.qop = self.choose_qop(challenge['qop'])
                 s.realm = challenge['realm']
                 s.nonce = challenge['nonce']
                 s.nc = 0
@@ -196,6 +220,7 @@ class DigestAuth2(requests.auth.AuthBase):
             except KeyError:
                 return None
             else:
+                if not s.qop: return None
                 return s
         elif nextnonce and session:
             s = copy(session)
@@ -218,10 +243,24 @@ class DigestAuth2(requests.auth.AuthBase):
 
         assert(self._tls.session is not None)
         session = self._tls.session
-        e1 = session.last_req[2].lower()
-        e2 = auth_info.get('rspauth', "<none>").lower()
+        svr_rspauth = session.last_req.respauth
+        if session.last_req.qop == 'auth':
+            e1 = svr_rspauth(None).lower()
+            e2 = auth_info.get('rspauth', "<none>").lower()
+        else:
+            body = r.content or b''
+            h, _s, _p = hash_algorithms[session.algorithm]
+            print("@@@ RESPONSEBODY = {}, hash={}".format(body, hash(h)(body)))
+            e1 = svr_rspauth(hash(h)(body)).lower()
+            e2 = auth_info.get('rspauth', "<none>").lower()
         if e1 != e2:
-            print("@@@ checking response authentication FAILED: expected {}, returned {}".format(e1 == e2, e1, e2), file=sys.stderr)
+            msg = "Digest ressponse authentication failed: expected {}, returned {}".format(e1, e2)
+            if self.strict_auth:
+                raise ContentDecodingError(msg)
+            else:
+                warn(RequestsWarning(msg))
+        else:
+            print("@@@ checking response authentication OK: {}".format(e1), file=sys.stderr)
 
         nextnonce = auth_info.get('nextnonce')
         if nextnonce:

@@ -43,7 +43,9 @@ def kd(h, sec, dat):
 
 def compute_digest(algo, *, username=None, realm=None, password=None,
                    passhash=None, method=None, url=None,
-                   nonce=None, nc=None, cnonce=None, qop=None):
+                   nonce=None, nc=None, cnonce=None, qop=None,
+                   req_body=None):
+
     if isinstance(algo, str):
         algo = hash_algorithms[algo]
     h, sess_mode, _p = algo
@@ -69,7 +71,15 @@ def compute_digest(algo, *, username=None, realm=None, password=None,
         a1 = b"%s:%s:%s" % (a1h, nonce, cnonce)
         a1h = hash(h)(a1)
 
-    a2 = b"%s:%s" % (method, url)
+    if qop == b'auth':
+        a2 = b"%s:%s" % (method, url)
+    elif qop == b'auth-int':
+        if req_body == None:
+            raise RuntimeError('no body provided with qop=auth-int')
+        a2 = b"%s:%s:%s" % (method, url, hash(h)(req_body))
+    else:
+        raise RuntimeError('unknown qop: ' + str(qop, 'utf-8'))
+
     a2h = hash(h)(a2)
 
     a3p = b"%s:%s:%s:%s:" % (nonce, nc, cnonce, qop)
@@ -77,8 +87,18 @@ def compute_digest(algo, *, username=None, realm=None, password=None,
     response_computed = kd(h, a1h, a3p + a2h).decode('ascii')
 
     a2r = b":%s" % url
-    a2rh = hash(h)(a2r)
 
-    rspauth = kd(h, a1h, a3p + a2rh)
+    if qop == b'auth':
+        a2rh = hash(h)(a2r)
+        rspauth = kd(h, a1h, a3p + a2rh).decode('ascii')
+        rspauth = (lambda _r: (lambda b: _r))(rspauth)
+    elif qop == b'auth-int':
+        rspauth = (lambda _a1h, _a3p, _a2r:
+                   (lambda bh:
+                    kd(h, _a1h,
+                       _a3p + hash(h)(_a2r + b":" + bh)
+                      ).decode('ascii')))(a1h, a3p, a2r)
+    else:
+        raise RuntimeError('unknown qop: ' + str(qop, 'utf-8'))
 
-    return (response_computed, rspauth.decode('ascii'))
+    return (response_computed, rspauth)
