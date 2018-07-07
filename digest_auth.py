@@ -1,43 +1,16 @@
+# Server-side implementation of HTTP Digest authentication
+# A part of the DOORMEN controller.
+# (c) 2018 National Institute of Advanced Industrial Science and Technology.
+
 import collections
 import os
 import hashlib
 import binascii
 import time
 
-def random_value(len=128):
-    len = (len + 7) // 8;
-    s = os.urandom(len)
-    return binascii.hexlify(s).decode('ascii')
-
-def http_encode(s):
-    s.replace('\\', '\\\\').replace('"', '\\"')
+from .digest_auth_funcs import random_value, hash_algorithms, compute_digest
 
 from .auth_core import BaseAuthenticator
-
-hash_algorithms = {
-    'sha-256': hashlib.sha256,
-    'md5': hashlib.md5
-}
-
-for h in list(hash_algorithms.keys()):
-    a = hash_algorithms[h]
-    hash_algorithms[h] = (a, False)
-    hash_algorithms[h + '-sess'] = (a, True)
-
-def hash(h):
-    def f(b):
-        if isinstance(b, str):
-#            print("@@@ STR IS GIVEN")
-            b = b.encode('utf-8')
-        v = h(b).digest()
-        v = binascii.hexlify(v)
-#        print("@@@INPUT={!r} OUTPUT={!r}".format(b, v))
-        return v
-    return f
-
-def kd(h, sec, dat):
-#    print("KD: hash={!r} sec={!r} dat={!r}".format(h, sec, dat))
-    return hash(h)(sec + b":" + dat)
 
 NonceSession = collections.namedtuple('NonceSession',
                                       ['nonce', 'algo', 'used_nc', 'nc_max', 'endtime'])
@@ -76,6 +49,9 @@ class NonceCache:
             #print ("@@@ dropped {}".format(k))
         return session
 
+    def __delitem__(self, k):
+        del self.dic[k]
+
 class DigestAuthenticator(BaseAuthenticator):
     def __init__(self, algo, realm, checkerdic, idwrap=str, cache_params={}):
         super().__init__('Digest')
@@ -88,7 +64,7 @@ class DigestAuthenticator(BaseAuthenticator):
 
     def check_auth(self, v, request):
 #        print ("@@@ STATES: {!r}".format(self.nonce_cache.dic))
-        h, sess_mode = hash_algorithms[self.algo]
+        h, sess_mode, _p = hash_algorithms[self.algo]
         
         if '' in v:
             return False
@@ -102,7 +78,6 @@ class DigestAuthenticator(BaseAuthenticator):
             nonce = v['nonce']
             nc = v['nc']
             cnonce = v['cnonce']
-            nc = v['nc']
             opaque = v['opaque']
             response = v['response']
             r_uri = v['uri']
@@ -145,22 +120,22 @@ class DigestAuthenticator(BaseAuthenticator):
         if (qop != 'auth'):
             return False, sessk  #flask.abort(400) # unimplemented
 
-        a1 = "{}:{}:{}".format(username, realm, self.dic[username]).encode('utf-8')
-        if sess_mode:
-            a1 = "{}:{}:{}".format(hash(h)(a1), nonce, cnonce).encode('utf-8')
-        a2 = "{}:{}".format(request.method, request_url).encode('utf-8')
-        a2h = hash(h)(a2)
-        a3p = "{}:{}:{}:{}:".format(nonce, nc, cnonce, qop).encode('utf-8')
-        response_computed = kd(h, hash(h)(a1), a3p + a2h)
-        response_computed = response_computed.decode('ascii')
-#        print("AUTH: computed={}, given={}".format(response_computed, response))
+        try:
+            response_computed, rspauth = compute_digest(
+                self.algo, username=username, realm=realm,
+                password=self.dic[username],
+                method=request.method, url=request_url,
+                nonce=nonce, nc=nc, cnonce=cnonce, qop=qop)
+        except ValueError:
+            # decoding failure
+            return False
+
+        #        print("AUTH: computed={}, given={}".format(response_computed, response))
         
         if response.lower() != response_computed:
             return False, sessk
 
-        sessk['a1'] = a1
-        sessk['a3p'] = a3p
-        sessk['a2rp'] = ":{}".format(request_url).encode('utf-8')
+        sessk['rspauth'] = rspauth
         sessk['cnonce'] = cnonce
         sessk['nc'] = nc
 
@@ -185,12 +160,10 @@ class DigestAuthenticator(BaseAuthenticator):
         return [('Digest', h)]
 
     def generate_auth_info(self, sessk):
-        h, sess_mode = hash_algorithms[self.algo]
+        h, sess_mode, _p = hash_algorithms[self.algo]
 #        print("GENERATE_AUTHINFO: {!r}".format(sessk))
         
-        response_computed = kd(h, hash(h)(sessk['a1']), sessk['a3p'] + sessk['a2rp'])
-
-        h = {'rspauth': response_computed.decode('ascii'),
+        h = {'rspauth': sessk['rspauth'],
              'qop': 'auth',
              'cnonce': sessk['cnonce'],
              'nc': sessk['nc']}

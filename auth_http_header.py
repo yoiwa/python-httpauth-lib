@@ -136,6 +136,67 @@ def parse_http7615_header(s):
             break
     return schemes
 
+def parse_http7615_authinfo(s):
+    s = s.strip(" \t\r\n")
+    p = 0
+    slen = len(s)
+
+    def eos():
+        return p == slen
+
+    def eat_token(d, ts):
+        nonlocal s, p
+        r = eat_token_maybe(d, ts)
+        if r == None:
+            raise ValueError("parse error cannot take tokenset {} in input position {}".format(ts, p))
+        return r
+
+    def eat_token_maybe(d, ts):
+        nonlocal s, p
+#        print("@@@ {}: s={!r}###{!r}, p={}, ts={}, re={!r}".format(d, s[0:p], s[p:], p, ts, tokensets[ts]))
+        m = tokensets[ts].match(s, p)
+        if m == None:
+            return None
+        p = m.end()
+        token = m.lastgroup
+        value = m.group(token)
+        return token, value, m
+
+    def eat_commas(d):
+        if eat_token_maybe(d, 'comma'):
+            while eat_token_maybe(d, 'comma'):
+                pass
+            return True
+        return False
+
+    def parse_challenge():
+        params = {}
+        while True:
+            r = eat_token_maybe('authinfo_2+', 'commas_auth_param')
+            if not r:
+                break
+            (t, v, m) = r
+            key = m.group('key').lower()
+            value = parse_http_str(m.group('value'))
+            if key[-1] == '*':
+                key, value = process_rfc5987(key, value)
+            if key in params:
+                raise ValueError("in auth scheme {}, key {} appeared twice at position {}".format(auth_scheme, key, pos))
+            params[key] = value
+        return params
+
+    def parse_http_str(s):
+        if s[0] == '"':
+            return re.sub(r"\\(.)", r'\1', s[1:-1])
+        else:
+            return s
+
+    params = parse_challenge()
+    eat_commas('after_challenge')
+    if not eos():
+        raise ValueError('error at pos {}'.format(p))
+    return params
+
 header_rules = {
     'digest': {
         'stale': 3,
@@ -218,14 +279,16 @@ if __name__=='__main__':
 #    print(repr(parse_http7615_header(r', Digest foo=bar, , roo="var abc\"k\a", , Basic agnofo1_/=  , , mutual , Foo=bar, ,, roo="vari", , Mutual foo=2, , var="xx", , , ')))
 #    print(repr(parse_http7615_header(r', Digest foo=bar, , roo="var abc\"k\a", , Basic agnofo1_/=  , , mutual , Foo=bar, ,, roo*=iso-8859-1' + "''" + '%a1%2cb%2c%22d%22, , Mutual foo=2, , var="xx", , , ')))
 #    print(repr(parse_http7615_header(r', Digest foo=bar, , roo="var abc\"k\a", , Basic agnofo1_/=  , , mutual , Foo=bar, ,, roo*=utf-8' + "'en'" + '%c2%a1%2cb%2c%22d%22, , Mutual foo=2, , var="xx", , , ')))
-    print(encode_http7615_header(
-        [('Digest', {'roo': 'var abc"ka', 'foo': 'bar'}),
-         ('Basic', {'': 'agnofo1_/='}),
-         ('Mutual', {'roo': '¡,b,"d"', 'foo': 'bar'}),
-         ('Mutual', {'var': 'xx', 'foo': '2'})]))
-    print(encode_http7615_header(
-        [('Digest', {'stale': '1', 'algorithm': '1', 'realm': '1', 'username': '1'}),
-         ('Digest', {'stale': '日本語', 'algorithm': '日本語', 'realm': '日本語', 'username': '日本語'}),
-         ('Mutual', {'roo': '¡,b,"d"', 'foo': 'bar'}),
-         ('Mutual', {'stale': '日本語', 'algorithm': '日本語', 'realm': '日本語', 'username': '日本語'}),
-         ('Mutual', {'var': 'xx', 'foo': '2'})]))
+#    print(encode_http7615_header(
+#        [('Digest', {'roo': 'var abc"ka', 'foo': 'bar'}),
+#         ('Basic', {'': 'agnofo1_/='}),
+#         ('Mutual', {'roo': '¡,b,"d"', 'foo': 'bar'}),
+#         ('Mutual', {'var': 'xx', 'foo': '2'})]))
+#    print(encode_http7615_header(
+#        [('Digest', {'stale': '1', 'algorithm': '1', 'realm': '1', 'username': '1'}),
+#         ('Digest', {'stale': '日本語', 'algorithm': '日本語', 'realm': '日本語', 'username': '日本語'}),
+#         ('Mutual', {'roo': '¡,b,"d"', 'foo': 'bar'}),
+#         ('Mutual', {'stale': '日本語', 'algorithm': '日本語', 'realm': '日本語', 'username': '日本語'}),
+#         ('Mutual', {'var': 'xx', 'foo': '2'})]))
+    print(repr(parse_http7615_authinfo(r', foo=bar, , roo="var abc\"k\a", , Foof=bar, ,, roor*=utf-8' + "'en'" + '%c2%a1%2cb%2c%22d%22, var="xx", , , ')))
+    print(repr(parse_http7615_authinfo(r'qop="auth", nc="00000001", cnonce="04721aef3e82d7f5f902089a847b8463c90fd1d2", rspauth="85d3623c71323cb989eef82d99590e7b"')))
