@@ -18,6 +18,8 @@ NonceSession.near_last = (lambda self:
                           self.nc_max - 2 <= len(self.used_nc)
                           or self.endtime < time.time() + 10)
 
+supported_qops = {'auth', 'auth-int'}
+
 class NonceCache:
     def __init__(self, params, algo=None):
         self.dic = collections.OrderedDict()
@@ -68,18 +70,24 @@ RequestResponseState.empty = RequestResponseState()
 class DigestAuthenticator(BaseAuthenticator):
     def __init__(self, algo, realm, checkerdic, idwrap=str, qops=['auth'], cache_params={}):
         super().__init__('Digest')
-        self.algo = algo.lower()
+        self.algoname_lower = algo.lower()
+        self.algo = hash_algorithms.get(self.algoname_lower)
+        if not self.algo:
+            raise RuntimeError("no Digest algorithm {} defined".format(algo))
         self.dic = checkerdic
         self.realm = realm
         self.idwrap = idwrap
         self.qops = qops
+        for qop in qops:
+            if not qop in supported_qops:
+                raise RuntimeError("no qop {} defined".format(qop))
         self.nonce_cache = NonceCache(cache_params, algo=self.algo)
         self.opaque = random_value(64)
 
     def check_auth(self, v, request):
 #        print ("@@@ STATES: {!r}".format(self.nonce_cache.dic))
-        h, sess_mode, _p = hash_algorithms[self.algo]
-        
+        algo = self.algo
+
         if '' in v:
             return False
         
@@ -99,7 +107,7 @@ class DigestAuthenticator(BaseAuthenticator):
 
         if realm != self.realm:
             return False
-        if algorithm != self.algo:
+        if algorithm != self.algoname_lower:
             return False
 
         session = self.nonce_cache.get(nonce)
@@ -168,7 +176,7 @@ class DigestAuthenticator(BaseAuthenticator):
             session = self.nonce_cache.new_nonce()
         h = {'realm': self.realm,
              'qop': ", ".join(self.qops),
-             'algorithm': session.algo,
+             'algorithm': session.algo.name,
              'nonce': session.nonce,
              'opaque': self.opaque,
              'charset': 'UTF-8'}
@@ -178,20 +186,15 @@ class DigestAuthenticator(BaseAuthenticator):
         return [('Digest', h)]
 
     def generate_auth_info(self, sessk, response):
-        h, sess_mode, _p = hash_algorithms[self.algo]
 #        print("GENERATE_AUTHINFO: {!r}".format(sessk))
 
         if(sessk.qop == 'auth-int'):
             response.make_sequence()
             body_iter = response.iter_encoded()
-            m = h()
-            for b in body_iter:
-                m.update(b)
-            bodyhash = binascii.hexlify(m.digest())
         else:
-            bodyhash = None
+            body_iter = None
 
-        h = {'rspauth': sessk.rspauth(bodyhash),
+        h = {'rspauth': sessk.rspauth(body_iter),
              'qop': sessk.qop,
              'cnonce': sessk.cnonce,
              'nc': sessk.nc}

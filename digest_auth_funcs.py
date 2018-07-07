@@ -5,6 +5,7 @@
 import os
 import hashlib
 import binascii
+import collections
 
 def random_value(len=128):
     """hexadecimal random values in string."""
@@ -12,34 +13,47 @@ def random_value(len=128):
     s = os.urandom(len)
     return binascii.hexlify(s).decode('ascii')
 
-hash_algorithms = {
-    'md5': (hashlib.md5, 0),
-    'sha1': (hashlib.sha1, 2),
-    'sha-256': (hashlib.sha256, 4),
-    'sha-512': (hashlib.sha512, 6)
-}
 
-for h in list(hash_algorithms.keys()):
-    a , p = hash_algorithms[h]
-    hash_algorithms[h] = (a, False, p)
-    hash_algorithms[h + '-sess'] = (a, True, p + 1)
+DigestAlgorithm = collections.namedtuple(
+    'DigestAlgorithm',
+    ['name', 'h', 'sess_mode', 'precedence'])
 
-def hash(h):
+def _make_hash(h):
     """hexadecimal hash of bytes in bytes."""
-    def f(b):
+    def hashfun(b):
+        m = h()
         if isinstance(b, str):
-#            print("@@@ STR IS GIVEN")
-            b = b.encode('utf-8')
-        v = h(b).digest()
-        v = binascii.hexlify(v)
-#        print("@@@INPUT={!r} OUTPUT={!r}".format(b, v))
+            raise ValueError("hash should receive bytes, not str")
+            m.update(b.encode('utf-8'))
+        elif not isinstance(b, bytes) and hasattr(b, '__iter__'):
+            for e in b:
+                m.update(e)
+        else:
+            m.update(b)
+        v = binascii.hexlify(m.digest())
+#       print("@@@INPUT={!r} OUTPUT={!r}".format(b, v))
         return v
-    return f
+    return hashfun
+
+hash_algorithms = {}
+
+for name, v in {
+        'MD5': (hashlib.md5, 0),
+        'SHA1': (hashlib.sha1, 2),
+        'SHA-256': (hashlib.sha256, 4),
+        'SHA-512': (hashlib.sha512, 6) }.items():
+    a, p = v
+    hf = _make_hash(a)
+    hash_algorithms[name.lower()] = \
+        DigestAlgorithm(name=name, h=hf, sess_mode=False, precedence=p)
+    hash_algorithms[name.lower() + '-sess'] = \
+        DigestAlgorithm(name=name+'-sess',
+                        h=hf, sess_mode=True, precedence=p+1)
 
 def kd(h, sec, dat):
     """keyed digest of bytes in bytes."""
 #    print("KD: hash={!r} sec={!r} dat={!r}".format(h, sec, dat))
-    return hash(h)(sec + b":" + dat)
+    return h(sec + b":" + dat)
 
 def compute_digest(algo, *, username=None, realm=None, password=None,
                    passhash=None, method=None, url=None,
@@ -47,8 +61,8 @@ def compute_digest(algo, *, username=None, realm=None, password=None,
                    req_body=None):
 
     if isinstance(algo, str):
-        algo = hash_algorithms[algo]
-    h, sess_mode, _p = algo
+        algo = hash_algorithms[algo.lower()]
+    H = algo.h
 
     if isinstance(username, str): username = username.encode('utf-8')
     if isinstance(realm, str):    realm = realm.encode('utf-8')
@@ -63,41 +77,41 @@ def compute_digest(algo, *, username=None, realm=None, password=None,
 
     if passhash == None:
         a1 = b"%s:%s:%s" % (username, realm, password)
-        a1h = hash(h)(a1)
+        a1h = H(a1)
     else:
         a1h = passhash
 
-    if sess_mode:
+    if algo.sess_mode:
         a1 = b"%s:%s:%s" % (a1h, nonce, cnonce)
-        a1h = hash(h)(a1)
+        a1h = H(a1)
 
     if qop == b'auth':
         a2 = b"%s:%s" % (method, url)
     elif qop == b'auth-int':
         if req_body == None:
             raise RuntimeError('no body provided with qop=auth-int')
-        a2 = b"%s:%s:%s" % (method, url, hash(h)(req_body))
+        a2 = b"%s:%s:%s" % (method, url, H(req_body))
     else:
         raise RuntimeError('unknown qop: ' + str(qop, 'utf-8'))
 
-    a2h = hash(h)(a2)
+    a2h = H(a2)
 
     a3p = b"%s:%s:%s:%s:" % (nonce, nc, cnonce, qop)
 
-    response_computed = kd(h, a1h, a3p + a2h).decode('ascii')
+    response_computed = kd(H, a1h, a3p + a2h).decode('ascii')
 
     a2r = b":%s" % url
 
     if qop == b'auth':
-        a2rh = hash(h)(a2r)
-        rspauth = kd(h, a1h, a3p + a2rh).decode('ascii')
+        a2rh = H(a2r)
+        rspauth = kd(H, a1h, a3p + a2rh).decode('ascii')
         rspauth = (lambda _r: (lambda b: _r))(rspauth)
     elif qop == b'auth-int':
-        rspauth = (lambda _a1h, _a3p, _a2r:
-                   (lambda bh:
-                    kd(h, _a1h,
-                       _a3p + hash(h)(_a2r + b":" + bh)
-                      ).decode('ascii')))(a1h, a3p, a2r)
+        rspauth = (lambda _a1h, _a3p, _a2r, _H:
+                   (lambda body:
+                    kd(H, _a1h,
+                       _a3p + H(_a2r + b":" + H(body))
+                      ).decode('ascii')))(a1h, a3p, a2r, H)
     else:
         raise RuntimeError('unknown qop: ' + str(qop, 'utf-8'))
 

@@ -12,7 +12,7 @@ from requests.exceptions import ContentDecodingError, RequestsWarning
 from warnings import warn
 from copy import copy
 
-from .digest_auth_funcs import random_value, hash_algorithms, compute_digest, hash
+from .digest_auth_funcs import random_value, hash_algorithms, compute_digest
 from .auth_http_header import encode_http7615_header, parse_http7615_header, parse_http7615_authinfo, parse_csv_string
 import requests
 import requests.cookies
@@ -126,7 +126,7 @@ class DigestAuth2(requests.auth.AuthBase):
         try:
             auth_header = parse_http7615_header(r.headers['www-authenticate'])
         except:
-            print("@@@ WWW-Authenticate parse failed.", file=sys.stderr)
+            print("@@@ WWW-Authenticate parse failed: {!r}.".format(r.headers['www-authenticate']), file=sys.stderr)
             return r
 
         #print("@@@ WWW-Authenticate header: {!r}.".format(auth_header))
@@ -160,12 +160,12 @@ class DigestAuth2(requests.auth.AuthBase):
             prec, challenge = (-1, None)
             for (c, kv) in auth_header:
                 if c != 'Digest': continue
-                algo = kv.get('algorithm', None)
-                if not algo or algo not in hash_algorithms: continue
+                algoname = kv.get('algorithm', "").lower()
+                if algoname not in hash_algorithms: continue
                 if self.realm and kv.get('realm', None) != self.realm: continue
-                (_h, _s, p) = hash_algorithms[algo]
-                if p > prec:
-                    prec, challenge = p, kv
+                algo = hash_algorithms[algoname]
+                if algo.precedence > prec:
+                    prec, challenge = algo.precedence, kv
 
         #print("@@@ best challenge to be {!r}".format(challenge))
         if not challenge:
@@ -245,13 +245,12 @@ class DigestAuth2(requests.auth.AuthBase):
         session = self._tls.session
         svr_rspauth = session.last_req.respauth
         if session.last_req.qop == 'auth':
-            e1 = svr_rspauth(None).lower()
+            e1 = svr_rspauth(None)
             e2 = auth_info.get('rspauth', "<none>").lower()
         else:
             body = r.content or b''
-            h, _s, _p = hash_algorithms[session.algorithm]
             #print("@@@ RESPONSEBODY = {}, hash={}".format(body, hash(h)(body)))
-            e1 = svr_rspauth(hash(h)(body)).lower()
+            e1 = svr_rspauth(body)
             e2 = auth_info.get('rspauth', "<none>").lower()
         if e1 != e2:
             msg = "Digest ressponse authentication failed: expected {}, returned {}".format(e1, e2)
