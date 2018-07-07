@@ -250,7 +250,7 @@ class DigestAuth2(requests.auth.AuthBase):
         else:
             body = r.content or b''
             h, _s, _p = hash_algorithms[session.algorithm]
-            print("@@@ RESPONSEBODY = {}, hash={}".format(body, hash(h)(body)))
+            #print("@@@ RESPONSEBODY = {}, hash={}".format(body, hash(h)(body)))
             e1 = svr_rspauth(hash(h)(body)).lower()
             e2 = auth_info.get('rspauth', "<none>").lower()
         if e1 != e2:
@@ -260,10 +260,11 @@ class DigestAuth2(requests.auth.AuthBase):
             else:
                 warn(RequestsWarning(msg))
         else:
-            print("@@@ checking response authentication OK: {}".format(e1), file=sys.stderr)
+            pass
+            #print("@@@ checking response authentication OK: {}".format(e1), file=sys.stderr)
 
         nextnonce = auth_info.get('nextnonce')
         if nextnonce:
-            print("@@@ Nonce renewal requested: {} -> {}".format(session.nonce, nextnonce), file=sys.stderr)
+            #print("@@@ Nonce renewal requested: {} -> {}".format(session.nonce, nextnonce), file=sys.stderr)
             self._tls.session = self.create_new_session(nextnonce=nextnonce,session=session)
         return r

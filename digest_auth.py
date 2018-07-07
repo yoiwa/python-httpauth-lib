@@ -52,6 +52,19 @@ class NonceCache:
     def __delitem__(self, k):
         del self.dic[k]
 
+class RequestResponseState:
+    __slots__ = ['session', 'rspauth', 'qop', 'cnonce', 'nc', 'stale']
+    def __init__(self, session=None, rspauth=None, qop=None,
+                 cnonce=None, nc=None, stale=False):
+        self.session = session
+        self.rspauth = rspauth
+        self.qop = qop
+        self.cnonce = cnonce
+        self.nc = nc
+        self.stale = stale
+
+RequestResponseState.empty = RequestResponseState()
+
 class DigestAuthenticator(BaseAuthenticator):
     def __init__(self, algo, realm, checkerdic, idwrap=str, qops=['auth'], cache_params={}):
         super().__init__('Digest')
@@ -88,9 +101,9 @@ class DigestAuthenticator(BaseAuthenticator):
             return False
         if algorithm != self.algo:
             return False
-        
+
         session = self.nonce_cache.get(nonce)
-        sessk = {'session': session}
+
         if not session:
             return False, {'stale': True}
         assert(session.nonce == nonce)
@@ -112,7 +125,7 @@ class DigestAuthenticator(BaseAuthenticator):
         # Flask cannot distinguish ".../" and ".../?"
 
         if nc in session.used_nc:
-            return False, {'stale': True}
+            return False, RequestResponseState(stale=True)
 
         session.used_nc.add(nc)
 
@@ -139,20 +152,18 @@ class DigestAuthenticator(BaseAuthenticator):
         # print("AUTH: computed={}, given={}".format(response_computed, response))
         
         if response.lower() != response_computed:
-            return False, sessk
+            return False, RequestResponseState(session=session)
 
-        sessk['rspauth'] = rspauth
-        sessk['qop'] = qop
-        sessk['cnonce'] = cnonce
-        sessk['nc'] = nc
+        sessk = RequestResponseState(
+            session=session, rspauth=rspauth, qop=qop,
+            cnonce=cnonce, nc=nc)
 
         return (self.idwrap(username), sessk)
 
     def generate_challenge(self, sessk):
-        sessk = sessk or {}
-        stale = ('stale' in sessk)
-        if 'session' in sessk:
-            session = sessk['session']
+        sessk = sessk or RequestResponseState.empty
+        if sessk.session:
+            session = sessk.session
         else:
             session = self.nonce_cache.new_nonce()
         h = {'realm': self.realm,
@@ -161,7 +172,7 @@ class DigestAuthenticator(BaseAuthenticator):
              'nonce': session.nonce,
              'opaque': self.opaque,
              'charset': 'UTF-8'}
-        if stale:
+        if sessk.stale:
             h['stale'] = '1'
 #        print("GENERATE_CHALLENGE: {!r}".format(h))
         return [('Digest', h)]
@@ -170,25 +181,22 @@ class DigestAuthenticator(BaseAuthenticator):
         h, sess_mode, _p = hash_algorithms[self.algo]
 #        print("GENERATE_AUTHINFO: {!r}".format(sessk))
 
-        if(sessk['qop'] == 'auth-int'):
+        if(sessk.qop == 'auth-int'):
             response.make_sequence()
             body_iter = response.iter_encoded()
             m = h()
-            s = b''
             for b in body_iter:
                 m.update(b)
-                s += b
-            # print ("@@@ RESPONSEBODY = {}".format(s))
             bodyhash = binascii.hexlify(m.digest())
         else:
             bodyhash = None
 
-        h = {'rspauth': sessk['rspauth'](bodyhash),
-             'qop': sessk['qop'],
-             'cnonce': sessk['cnonce'],
-             'nc': sessk['nc']}
+        h = {'rspauth': sessk.rspauth(bodyhash),
+             'qop': sessk.qop,
+             'cnonce': sessk.cnonce,
+             'nc': sessk.nc}
 
-        if sessk['session'].near_last():
+        if sessk.session.near_last():
             newsession = self.nonce_cache.new_nonce()
             h['nextnonce'] = newsession.nonce
 
