@@ -12,15 +12,19 @@ from .digest_auth_funcs import random_value, hash_algorithms, compute_digest
 from .auth_core import BaseAuthenticator
 from .auth_http_header import parse_csv_string
 
-NonceSession = collections.namedtuple('NonceSession',
-                                      ['nonce', 'algo', 'used_nc', 'nc_max', 'endtime'])
-NonceSession.near_last = (lambda self:
-                          self.nc_max - 2 <= len(self.used_nc)
-                          or self.endtime < time.time() + 10)
+class NonceSession(collections.namedtuple(
+        'NonceSession',
+        ['nonce', 'algo', 'used_nc', 'nc_max', 'endtime'])):
+    """a Digest-auth session represented by a nonce"""
+
+    def near_last(self):
+        return (self.nc_max - 2 <= len(self.used_nc)
+                or self.endtime < time.time() + 10)
 
 supported_qops = {'auth', 'auth-int'}
 
 class NonceCache:
+    """An LRU cache and generator for active nonces."""
     def __init__(self, params, algo=None):
         self.dic = collections.OrderedDict()
         self.maxentries = params.get('entries', 1024)
@@ -41,7 +45,7 @@ class NonceCache:
 
     def new_nonce(self):
         nonce = random_value(128)
-        session = NonceSession(nonce=nonce,algo=self.algo,
+        session = NonceSession(nonce=nonce, algo=self.algo,
                                endtime=(time.time() + self.timeout), used_nc=set(),
                                nc_max = self.nc_max)
         #print ("@@@ nonce {} created".format(nonce))
@@ -68,6 +72,19 @@ class RequestResponseState:
 RequestResponseState.empty = RequestResponseState()
 
 class DigestAuthenticator(BaseAuthenticator):
+    """Authenticator for the HTTP Digest access authentication.
+
+    It supports many features of new RFC 7616, including SHA-256
+    and UTF-8.  It also fully supports *-sess style variant,
+    proper nonce-checking for replay protection, and response
+    authentication.
+
+    It also supports qop=auth-int content body integrity checking,
+    but it may suffer performances (because requset/response body
+    must be fully available before processing.)
+
+    """
+
     def __init__(self, algo, realm, checkerdic, idwrap=str, qops=['auth'], cache_params={}):
         super().__init__('Digest')
         self.algoname_lower = algo.lower()
@@ -85,7 +102,14 @@ class DigestAuthenticator(BaseAuthenticator):
         self.opaque = random_value(64)
 
     def check_auth(self, v, request):
-#        print ("@@@ STATES: {!r}".format(self.nonce_cache.dic))
+        """
+        Authenticate an HTTP request.
+
+        Arguments:
+         - v: a key-value dict of HTTP Authorization params.
+         - request: a corresponding HTTP request.
+        """
+        # print ("@@@ STATES: {!r}".format(self.nonce_cache.dic))
         algo = self.algo
 
         if '' in v:
@@ -182,11 +206,11 @@ class DigestAuthenticator(BaseAuthenticator):
              'charset': 'UTF-8'}
         if sessk.stale:
             h['stale'] = '1'
-#        print("GENERATE_CHALLENGE: {!r}".format(h))
+        # print("GENERATE_CHALLENGE: {!r}".format(h))
         return [('Digest', h)]
 
     def generate_auth_info(self, sessk, response):
-#        print("GENERATE_AUTHINFO: {!r}".format(sessk))
+        # print("GENERATE_AUTHINFO: {!r}".format(sessk))
 
         if(sessk.qop == 'auth-int'):
             response.make_sequence()
@@ -204,3 +228,16 @@ class DigestAuthenticator(BaseAuthenticator):
             h['nextnonce'] = newsession.nonce
 
         return h
+
+"""
+Use case without Flask nor Werkzeug:
+- The request object must respond on
+   - .full_path: a requested URI w/o host part, starting from "/".
+   - .query_string: bytes for the query after '?'.
+   - .method: a case-sensitive request method.
+   - .data: a request body in bytes (used with qop=auth-int).
+
+- The response object for generate_auth_info must respond on
+   - .make_sequence: a preparation before iter_encoded.
+   - .iter_encoded: bytes of response body, or iterable returing that.
+"""

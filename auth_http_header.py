@@ -1,3 +1,7 @@
+# Parsing HTTP Authentication-related headers with full RFC7235/7615/5987 support.
+# A part of the DOORMEN controller.
+# (c) 2018 National Institute of Advanced Industrial Science and Technology.
+
 import collections
 import re
 
@@ -40,23 +44,42 @@ tokensets = {
 }
 
 def process_rfc5987(k, v):
-    assert(k[-1] == '*')
-    m = ext_value_regexp.match(v)
-    if m == None:
-        raise ValueError("bad rfc5987-style header: {}".format(k))
-    charset = m.group('charset').lower()
-    pvalue = m.group('value').encode('ascii')
-    if charset not in ('iso-8859-1', 'utf-8'):
-        raise ValueError("bad charset in rfc-5987-style header: {}".format(k))
-    dvalue = b_percent_regexp.sub(lambda mo: bytes.fromhex(mo.group(1).decode('ascii')), pvalue)
-    try:
-        dvalue = dvalue.decode(charset)
-    except ValueError:
-        raise ValueError("unencodable character in value: {}, {}".format(k, pvalue.decode('ascii')))
-    k = k[0:-1]
-    return k, dvalue
+    """Given a key-value pair, process RFC 5987-encoded multilingual
+    parameter.  Returned a decoded key-value pair.
+
+    """
+    if k != '' and k[-1] == '*':
+        m = ext_value_regexp.match(v)
+        if m == None:
+            raise ValueError("bad rfc5987-style header: {}".format(k))
+        charset = m.group('charset').lower()
+        pvalue = m.group('value').encode('ascii')
+        if charset not in ('iso-8859-1', 'utf-8'):
+            raise ValueError("bad charset in rfc-5987-style header: {}".format(k))
+        dvalue = b_percent_regexp.sub(lambda mo: bytes.fromhex(mo.group(1).decode('ascii')), pvalue)
+        try:
+            dvalue = dvalue.decode(charset)
+        except ValueError:
+            raise ValueError("unencodable character in value: {}, {}".format(k, pvalue.decode('ascii')))
+        k = k[0:-1]
+        return k, dvalue
+    else:
+        return k, v
 
 def parse_http7615_header(s):
+    """Parse WWW-Autheneicate and Authorization headers as defined in RFC 7235.
+    It supports multiple list of challenges (with complicated encoding),
+    RFC 5987 multilingual headers, and many syntactic trickles such as
+    excess commas.
+
+    Input is string (assumed to be ASCII or UTF-8),
+    and output is a list of (auth-scheme, { parameters in dict }) tuple.
+    It may have multiple instances for the same auth-scheme.
+
+    RFC 5987-encoded parameters
+    (e.g. foo*=utf-8''%c2%a1%2cb%2c%22d%22) are automatically decoded.
+
+    """
     s = s.strip(" \t\r\n")
     p = 0
     slen = len(s)
@@ -137,6 +160,16 @@ def parse_http7615_header(s):
     return schemes
 
 def parse_http7615_authinfo(s):
+    """Parse Authentication-info header as defined in HTTP 7615.
+    Unlike WWW-Authenticate (in RFC 7235), it lacks auth-scheme.
+
+    Input is string (assumed to be ASCII or UTF-8),
+    and output is a dict representing parameters.
+
+    RFC 5987-encoded parameters
+    (e.g. foo*=utf-8''%c2%a1%2cb%2c%22d%22) are automatically decoded.
+
+    """
     s = s.strip(" \t\r\n")
     p = 0
     slen = len(s)
@@ -257,6 +290,16 @@ def encode_param_val(s, k, v):
     return k + "*", "utf-8''" + q_bytes.decode('ascii')
 
 def encode_http7615_header(chal):
+    """Encode HTTP authentication challenges to a string as defined in RFC 7235.
+
+    Input is a list of (auth-scheme, parameters dict) pairs.
+    Output is an encoded string.
+
+    Non-ascii parameters are RFC 5987 encoded, except for some
+    hard-coded "forbidden" parameters, for which bare UCS characters
+    are is emitted.
+
+    """
     out = []
     for m, pl in chal:
         if "" in pl.keys():
@@ -268,30 +311,46 @@ def encode_http7615_header(chal):
             out.append("{} {}".format(m, ", ".join(po)))
     return ", ".join(out)
 
-def encode_http7615_authinfo(pl):
+def encode_http7615_authinfo(pl, auth_scheme='digest'):
+    """Encode an HTTP Authentication-Info header to a string as defined in
+    RFC 7615..
+
+    Input is a dict representing parameters.
+    Output is an encoded string.
+
+    Non-ascii parameters are RFC 5987 encoded, except for some
+    hard-coded "forbidden" parameters, for which bare UCS characters
+    are is emitted.
+
+    """
     po = []
     for k, v in pl.items():
-        po.append("{}={}".format(*encode_param_val('digest', k, v))) # TODO
+        po.append("{}={}".format(*encode_param_val(auth_scheme, k, v)))
     return ", ".join(po)
 
 def parse_csv_string(s):
+    """Parse a simple comma-separated tokens to a list of strings,
+    as used in the qop parameter in Digest authentication.
+
+    """
     return [x for x in (x.strip() for x in s.split(',')) if x != '']
 
 if __name__=='__main__':
-#    print(repr(parse_http7615_header(r'Digest foo=bar, roo="var abc\"k\a", Basic agnofo1_/= , Mutual foo=bar, roo="vari", Mutual foo=2, var="xx"')))
-#    print(repr(parse_http7615_header(r', Digest foo=bar, , roo="var abc\"k\a", , Basic agnofo1_/=  , , mutual , Foo=bar, ,, roo="vari", , Mutual foo=2, , var="xx", , , ')))
-#    print(repr(parse_http7615_header(r', Digest foo=bar, , roo="var abc\"k\a", , Basic agnofo1_/=  , , mutual , Foo=bar, ,, roo*=iso-8859-1' + "''" + '%a1%2cb%2c%22d%22, , Mutual foo=2, , var="xx", , , ')))
-#    print(repr(parse_http7615_header(r', Digest foo=bar, , roo="var abc\"k\a", , Basic agnofo1_/=  , , mutual , Foo=bar, ,, roo*=utf-8' + "'en'" + '%c2%a1%2cb%2c%22d%22, , Mutual foo=2, , var="xx", , , ')))
-#    print(encode_http7615_header(
-#        [('Digest', {'roo': 'var abc"ka', 'foo': 'bar'}),
-#         ('Basic', {'': 'agnofo1_/='}),
-#         ('Mutual', {'roo': '¡,b,"d"', 'foo': 'bar'}),
-#         ('Mutual', {'var': 'xx', 'foo': '2'})]))
-#    print(encode_http7615_header(
-#        [('Digest', {'stale': '1', 'algorithm': '1', 'realm': '1', 'username': '1'}),
-#         ('Digest', {'stale': '日本語', 'algorithm': '日本語', 'realm': '日本語', 'username': '日本語'}),
-#         ('Mutual', {'roo': '¡,b,"d"', 'foo': 'bar'}),
-#         ('Mutual', {'stale': '日本語', 'algorithm': '日本語', 'realm': '日本語', 'username': '日本語'}),
-#         ('Mutual', {'var': 'xx', 'foo': '2'})]))
+    ## the following test code includes UTF-8 characters.
+    # print(repr(parse_http7615_header(r'Digest foo=bar, roo="var abc\"k\a", Basic agnofo1_/= , Mutual foo=bar, roo="vari", Mutual foo=2, var="xx"')))
+    # print(repr(parse_http7615_header(r', Digest foo=bar, , roo="var abc\"k\a", , Basic agnofo1_/=  , , mutual , Foo=bar, ,, roo="vari", , Mutual foo=2, , var="xx", , , ')))
+    # print(repr(parse_http7615_header(r', Digest foo=bar, , roo="var abc\"k\a", , Basic agnofo1_/=  , , mutual , Foo=bar, ,, roo*=iso-8859-1' + "''" + '%a1%2cb%2c%22d%22, , Mutual foo=2, , var="xx", , , ')))
+    # print(repr(parse_http7615_header(r', Digest foo=bar, , roo="var abc\"k\a", , Basic agnofo1_/=  , , mutual , Foo=bar, ,, roo*=utf-8' + "'en'" + '%c2%a1%2cb%2c%22d%22, , Mutual foo=2, , var="xx", , , ')))
+    # print(encode_http7615_header(
+    #     [('Digest', {'roo': 'var abc"ka', 'foo': 'bar'}),
+    #      ('Basic', {'': 'agnofo1_/='}),
+    #      ('Mutual', {'roo': '¡,b,"d"', 'foo': 'bar'}),
+    #      ('Mutual', {'var': 'xx', 'foo': '2'})]))
+    # print(encode_http7615_header(
+    #     [('Digest', {'stale': '1', 'algorithm': '1', 'realm': '1', 'username': '1'}),
+    #      ('Digest', {'stale': '日本語', 'algorithm': '日本語', 'realm': '日本語', 'username': '日本語'}),
+    #      ('Mutual', {'roo': '¡,b,"d"', 'foo': 'bar'}),
+    #      ('Mutual', {'stale': '日本語', 'algorithm': '日本語', 'realm': '日本語', 'username': '日本語'}),
+    #      ('Mutual', {'var': 'xx', 'foo': '2'})]))
     print(repr(parse_http7615_authinfo(r', foo=bar, , roo="var abc\"k\a", , Foof=bar, ,, roor*=utf-8' + "'en'" + '%c2%a1%2cb%2c%22d%22, var="xx", , , ')))
     print(repr(parse_http7615_authinfo(r'qop="auth", nc="00000001", cnonce="04721aef3e82d7f5f902089a847b8463c90fd1d2", rspauth="85d3623c71323cb989eef82d99590e7b"')))
