@@ -25,7 +25,7 @@ class DigestClientSession:
     def __init__(self):
         pass
 
-class DigestAuth2(requests.auth.AuthBase):
+class DigestAuth(requests.auth.AuthBase):
     # Logics for session resending and thread_local state management is
     # imported from requests/auth.py
     # it is the only available "documentation" for "requests"-library internals.
