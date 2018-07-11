@@ -152,16 +152,19 @@ class DigestAuthenticator(BaseAuthenticator):
                  (request.query_string == b'' and
                   r_uri + '?' == request.full_path))):
             del self.nonce_cache[nonce]
+            self.logger.debug("authentication failed: url parameter mismatch")
             return False
         request_url = r_uri # see above check for correctness
         # Flask cannot distinguish ".../" and ".../?"
 
         if nc in session.used_nc:
+            self.logger.debug("authentication failed: nc duplication detected")
             return False, RequestResponseState(stale=True)
 
         session.used_nc.add(nc)
 
         if (qop not in self.qops):
+            self.logger.debug("authentication failed: qop mismatch")
             return False
 
         if qop == 'auth-int':
@@ -179,11 +182,13 @@ class DigestAuthenticator(BaseAuthenticator):
                 qop=qop, req_body=body)
         except ValueError:
             # decoding failure
+            self.logger.debug("authentication failed: decoding error in hash checking")
             return False
 
         # print("AUTH: computed={}, given={}".format(response_computed, response))
         
         if response.lower() != response_computed:
+            self.logger.debug("authentication failed: hash mismatch (wrong password?)")
             return False, RequestResponseState(session=session)
 
         sessk = RequestResponseState(
@@ -224,6 +229,7 @@ class DigestAuthenticator(BaseAuthenticator):
              'nc': sessk.nc}
 
         if sessk.session.near_last():
+            self.logger.debug("Digest: requesting nonce change")
             newsession = self.nonce_cache.new_nonce()
             h['nextnonce'] = newsession.nonce
 
@@ -237,7 +243,8 @@ Use case without Flask nor Werkzeug:
    - .method: a case-sensitive request method.
    - .data: a request body in bytes (used with qop=auth-int).
 
-- The response object for generate_auth_info must respond on
+- The response object for generate_auth_info must respond,
+  when using qop=auth-int, on
    - .make_sequence: a preparation before iter_encoded.
    - .iter_encoded: bytes of response body, or iterable returing that.
 """

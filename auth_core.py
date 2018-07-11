@@ -16,10 +16,12 @@ Authorization is Flask-specific.
 """
 
 from .auth_http_header import parse_http7615_header, encode_http7615_header, encode_http7615_authinfo
+import logging
 
 class BaseAuthenticator:
-    def __init__(self, scheme):
+    def __init__(self, scheme, logger=None):
         self.scheme = scheme
+        self.logger = logger or logging.getLogger('httpauth')
 
     def check_auth_full(self, method, param, request):
         """The same as check_auth(), but invoked for every requests
@@ -74,9 +76,10 @@ class BaseAuthenticator:
         return {}
 
 class BaseAuthorization:
-    def __init__(self, authenticator):
+    def __init__(self, authenticator, logger=None):
         self.authenticator = authenticator
         self._wrap = None
+        self.logger = logger or authenticator.logger
 
     def check_authz(self, resource, entity):
         """[To be overridden by subclasses]
@@ -101,14 +104,17 @@ class BaseAuthorization:
                      auth_header=None,
                      abort=None):
         if auth_header == None:
+            usr = None
             authz = self.check_authz(resource, None)
             hdr = None
         else:
             try:
                 cred = parse_http7615_header(auth_header)
             except ValueError:
+                self.logger.debug("authentication failed: malformed Authorization header")
                 abort(400, None)
             if len(cred) != 1:
+                self.logger.debug("authentication failed: malformed Authorization header (multiple responses)")
                 abort(400, None)
 
             met, kv = cred[0]
@@ -120,9 +126,12 @@ class BaseAuthorization:
             if usr:
                 authz = self.check_authz(resource, usr)
             else:
+                self.logger.debug("authentication failed")
                 authz = False
 
         if not authz:
+            if usr:
+                self.logger.debug("authorization failed")
             return abort(401, hdr)
 
         return usr, hdr

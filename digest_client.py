@@ -16,6 +16,7 @@ from .digest_auth_funcs import random_value, hash_algorithms, compute_digest
 from .auth_http_header import encode_http7615_header, parse_http7615_header, parse_http7615_authinfo, parse_csv_string
 import requests
 import requests.cookies
+import logging
 
 LastReq = collections.namedtuple('LastReq', ['nc', 'c_resp', 'qop', 'respauth'])
 
@@ -36,7 +37,7 @@ class DigestAuth(requests.auth.AuthBase):
     #  - support for "nextnonce" and "stale" flags.
     #  - more rigid rfc7615 header parsing,
 
-    def __init__(self, username, password, qops=['auth'], realm=None, strict_auth=True):
+    def __init__(self, username, password, qops=['auth'], realm=None, strict_auth=True, logger=None):
         self.username = username
         self.password = password
         self.realm = realm
@@ -44,6 +45,7 @@ class DigestAuth(requests.auth.AuthBase):
         self.strict_auth = strict_auth
         self._tls = threading.local()
         self._initialize_tls()
+        self.logger = logger or logging.getLogger('httpauth')
 
     def choose_qop(self, qop_header):
         l = parse_csv_string(qop_header)
@@ -121,12 +123,12 @@ class DigestAuth(requests.auth.AuthBase):
 
         #print("@@@ 401 HOOK CALLED")
         if 'www-authenticate' not in r.headers:
-            print("@@@ no WWW-Authenticate header.", file=sys.stderr)
+            self.logger.error("401 response with no WWW-Authenticate header.")
             return r
         try:
             auth_header = parse_http7615_header(r.headers['www-authenticate'])
         except:
-            print("@@@ WWW-Authenticate parse failed: {!r}.".format(r.headers['www-authenticate']), file=sys.stderr)
+            self.logger.error("cannot parse WWW-Authenticate header: {!r}.".format(r.headers['www-authenticate']))
             return r
 
         #print("@@@ WWW-Authenticate header: {!r}.".format(auth_header))
@@ -152,7 +154,7 @@ class DigestAuth(requests.auth.AuthBase):
                     retry_ok = False
                 break
             if not retry_ok:
-                print("@@@ authentication is not retryable.".format(kv), file=sys.stderr)
+                self.logger.info("authentication is not retryable.", file=sys.stderr)
                 return r
 
         if not challenge:
@@ -169,7 +171,7 @@ class DigestAuth(requests.auth.AuthBase):
 
         #print("@@@ best challenge to be {!r}".format(challenge))
         if not challenge:
-            print("@@@ no matching authentication scheme found.".format(kv), file=sys.stderr)
+            self.logger.error("no matching algorithm found.".format(kv))
             return r
 
         # now making a retry request.
@@ -180,7 +182,7 @@ class DigestAuth(requests.auth.AuthBase):
         #print("@@@ creaing new session from challenge {}".format(challenge))
         session = self.create_new_session(challenge=challenge)
         if not session:
-            print("@@@ creaing new session from challenge {} FAILED! (possibly bad headers from server)".format(challenge), file=sys.stderr)
+            self.logger.error("cannot create new session from challenge: bad header or parameter mismatch: {!r}".format(challenge), file=sys.stderr)
             return r
 
         tls.session = session
@@ -238,7 +240,7 @@ class DigestAuth(requests.auth.AuthBase):
             auth_info = r.headers['authentication-info']
             auth_info = parse_http7615_authinfo(auth_info)
         except ValueError as e:
-            print("@@@ parsing Authentication-Info: header failed: {}: {}.".format(auth_info, e), file=sys.stderr)
+            self.logger.error("parsing Authentication-Info: header failed: {}: {}.".format(auth_info, e))
             return r
 
         assert(self._tls.session is not None)
