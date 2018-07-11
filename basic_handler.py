@@ -120,17 +120,17 @@ class CombinedAuthenticator(BaseAuthenticator):
             if usr:
                 return (usr, (authn, hdr))
             else:
-                h.append(hdr)
-        return False, (None, h)
+                h.append((authn, hdr))
+        return False, (Ellipsis, h)
 
     def generate_challenge(self, h):
         r = []
         if h == None:
             for authn in self.authns:
                 r.extend(authn.generate_challenge(None))
-        elif h[0] == None:
+        elif h[0] is Ellipsis:
             assert(len(self.authns) == len(h[1]))
-            for authn, hh in zip(self.authns, h[1]):
+            for authn, hh in h[1]:
                 r.extend(authn.generate_challenge(hh))
         else:
             r.extend(h[0].generate_challenge[h[1]])
