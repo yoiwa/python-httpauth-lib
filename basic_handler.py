@@ -59,11 +59,6 @@ class BasicAuthenticator(BaseAuthenticator):
     def generate_challenge(self, h):
         return [('Basic', {'realm': self.realm, 'charset': 'UTF-8'})]
 
-class SimpleAuthorization(BaseAuthorization):
-    """Very simple authorizer accepting any authenticated entity."""
-    def check_authz(self, resource, entity):
-        return entity != None
-
 class BearerAuthenticator(BaseAuthenticator):
     """Authenticator for HTTP Bearer authentication."""
     def __init__(self, scope, tokendic, idwrap=str):
@@ -142,3 +137,8 @@ class CombinedAuthenticator(BaseAuthenticator):
             return authn.generate_auth_info(hdr, resp)
         else:
             return {}
+
+class SimpleAuthorization(BaseAuthorization):
+    """Very simple authorizer accepting any authenticated entity."""
+    def check_authz(self, resource, entity):
+        return entity != None

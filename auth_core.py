@@ -15,11 +15,7 @@ Authorization is Flask-specific.
 
 """
 
-from werkzeug.exceptions import Unauthorized
-from functools import wraps
 from .auth_http_header import parse_http7615_header, encode_http7615_header, encode_http7615_authinfo
-import flask
-from flask import abort
 
 class BaseAuthenticator:
     def __init__(self, scheme):
@@ -80,6 +76,7 @@ class BaseAuthenticator:
 class BaseAuthorization:
     def __init__(self, authenticator):
         self.authenticator = authenticator
+        self._wrap = None
 
     def check_authz(self, resource, entity):
         """[To be overridden by subclasses]
@@ -92,19 +89,17 @@ class BaseAuthorization:
         """
         return False
 
-    def _return_401(self, hdr=None, r=None, status=None):
-        chal = self.authenticator.generate_challenge(hdr)
-        hdr = {"WWW-Authenticate": encode_http7615_header(chal)} if chal != "" else {}
-        if r == None:
-            r = Unauthorized()
-        r = r.get_response()
-        for k, v in hdr.items():
-            r.headers[k] = v
-        flask.abort(r)
+    def abort(self, status, hdr):
+        raise NotImplementedError()
 
-    def authenticate(self, resource):
-        auth_header = flask.request.headers.get('authorization')
+    def generate_auth_info(self, *a, **kwargs):
+        return self.authenticator.generate_auth_info(*a, **kwargs)
+    def generate_challenge(self, *a, **kwargs):
+        return self.authenticator.generate_challenge(*a, **kwargs)
 
+    def authenticate(self, resource, request,
+                     auth_header=None,
+                     abort=None):
         if auth_header == None:
             authz = self.check_authz(resource, None)
             hdr = None
@@ -112,12 +107,12 @@ class BaseAuthorization:
             try:
                 cred = parse_http7615_header(auth_header)
             except ValueError:
-                abort(400)
+                abort(400, None)
             if len(cred) != 1:
-                abort(400)
+                abort(400, None)
 
             met, kv = cred[0]
-            authn = self.authenticator.check_auth_full(met, kv, flask.request)
+            authn = self.authenticator.check_auth_full(met, kv, request)
 
             if not authn:
                 authn = authn, None
@@ -128,32 +123,15 @@ class BaseAuthorization:
                 authz = False
 
         if not authz:
-            return self._return_401(hdr=hdr)
+            return abort(401, hdr)
 
-        flask.g.auth_value = usr
-        return hdr
+        return usr, hdr
 
-    def wrap_result(self, rv, hdr):
-        if hdr:
-            r = flask.make_response(rv)
-            h = self.authenticator.generate_auth_info(hdr, r)
-            if h != {}:
-                r.headers['Authentication-Info'] = encode_http7615_authinfo(h)
-            return r
-        else:
-            return rv
+    def _flask_wrap(self):
+        if not self._wrap:
+            from . import flask_adapter
+            self._wrap = flask_adapter.FlaskAuthWrapper(self)
+        return self._wrap
 
     def __call__(self, resource):
-        def wrap(f):
-            @wraps(f)
-            def wrapped(*a, **k):
-                h = self.authenticate(resource)
-                try:
-                    r = f(*a, **k)
-                    return self.wrap_result(r, h)
-                except Unauthorized as e:
-                    if e.response == None:
-                        self._return_401(hdr=h, r=e)
-                    raise
-            return wrapped
-        return wrap
+        return self._flask_wrap()(resource)

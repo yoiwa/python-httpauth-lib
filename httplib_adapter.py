@@ -7,14 +7,15 @@ HTTP Authentication adapter for httplib applications.
 
 How to use:
  1) Instanciate an Authenticator class.
- 2) make Handlerclass inherited from AuthnHTTPRequestHandler,
+ 2) Set it to an Authorization class.
+ 3) make Handlerclass inherited from AuthnHTTPRequestHandler,
     or put AuthHTTPMixin in the "top of" superclass list.
- 3) call authenticate at the front of actions.
- 4) if it returned any false value,
+ 4) call authenticate at the front of actions.
+ 5) if it returned any false value,
     simply return from the action.
 
 Steps 3-4 looks like following:
-        usr = self.authenticate(authn)
+        usr = self.authenticate(authz)
         if not usr:
             return
 
@@ -29,53 +30,40 @@ def d(f, *a):
 
 class AuthHTTPMixin:
     class abort(BaseException):
-        def __init__(self, reason):
+        def __init__(self, reason, hdr):
             self._reason = reason
+            self._hdr = hdr
 
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         self.__auth_add_headers = {}
 
-    def authenticate(self, authn):
+    def authenticate(self, authz, resource):
         self.__auth_add_headers = {}
-        hdr = None
+
         auth_header = self.headers.get('Authorization')
-        d('authheader={}', auth_header)
+        request = types.SimpleNamespace()
+        parse = urllib.parse.urlparse(self.path)
+        request.query_string = parse.query.encode('iso-8859-1','replace')
+        request.full_path = parse.path + '?' + parse.query
+        # see workaround for excess '?' in digest_auth.py
+        request.method = self.command
+        def abort(reason, hdr):
+            raise AuthHTTPMixin.abort(reason, hdr)
         try:
-            if auth_header == None:
-                raise AuthHTTPMixin.abort(401)
-            else:
-                try:
-                    cred = parse_http7615_header(auth_header)
-                except ValueError:
-                    AuthHTTPMixin.abort(400)
-                if len(cred) != 1:
-                    AuthHTTPMixin.abort(400)
+            usr, hdr = authz.authenticate(
+                resource, request,
+                auth_header=auth_header,
+                abort=abort)
 
-                request = types.SimpleNamespace()
-                parse = urllib.parse.urlparse(self.path)
-                request.query_string = parse.query.encode('iso-8859-1','replace')
-                request.full_path = parse.path + '?' + parse.query
-                # see workaround for excess '?' in digest_auth.py
-                request.method = self.command
-
-                met, kv = cred[0]
-                a_ret = authn.check_auth_full(met, kv, request)
-                d("a_ret={!r}", a_ret)
-                if not a_ret:
-                    a_ret = a_ret, None
-                usr, hdr = a_ret
-                if usr:
-                    h = authn.generate_auth_info(hdr, None)
-                    if h != {}:
-                        self.__auth_add_headers['Authentication-Info'] = encode_http7615_authinfo(h)
-                    return usr
-                else:
-                    raise AuthHTTPMixin.abort(401)
+            h = authz.generate_auth_info(hdr, None)
+            if h != {}:
+                self.__auth_add_headers['Authentication-Info'] = encode_http7615_authinfo(h)
+            return usr
         except AuthHTTPMixin.abort as a:
             if a._reason == 401:
-                d("hdr={!r}", hdr)
-                chal = authn.generate_challenge(hdr)
+                d("hdr={!r}", a._hdr)
+                chal = authz.generate_challenge(a._hdr)
                 self.__auth_add_headers = {'WWW-Authenticate':
                                            encode_http7615_header(chal)} if chal != "" else {}
             self.send_error(a._reason)

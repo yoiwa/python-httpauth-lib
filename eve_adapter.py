@@ -28,7 +28,7 @@ from eve.auth import BasicAuth, request, Response, app, g, abort
 
 class EveAuthentication(BasicAuth):
     def __init__(self, authz):
-        self.authz = authz
+        self.authz = authz._flask_wrap()
 
     def authorized(self, allowed_roles, resource, method):
         hdr = self.authz.authenticate(resource)
