@@ -1,5 +1,5 @@
 # Server-side implementation of HTTP Digest authentication
-# A part of the DOORMEN controller.
+# A part of httpauth_lib from the DOORMEN project.
 # (c) 2018 National Institute of Advanced Industrial Science and Technology.
 
 import collections

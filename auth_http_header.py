@@ -1,5 +1,5 @@
 # Parsing HTTP Authentication-related headers with full RFC7235/7615/5987 support.
-# A part of the DOORMEN controller.
+# A part of httpauth_lib from the DOORMEN project.
 # (c) 2018 National Institute of Advanced Industrial Science and Technology.
 
 import collections
