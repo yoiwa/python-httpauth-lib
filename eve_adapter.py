@@ -37,14 +37,12 @@ class EveAuthentication(BasicAuth):
         return True
 
     def authenticate(self):
-        self.authz._return_401(g.get('_h_for_authentication_info'))
+        self.authz._return_401(g.get('_hdr_for_authentication_info'))
 
     def post_hook(self, resource, request, response):
-        hdr = g.get('_h_for_authentication_info')
+        hdr = g.get('_hdr_for_authentication_info')
         if hdr:
-            h = self.authz.generate_auth_info(hdr, response)
-            if h != {}:
-                response.headers['Authentication-Info'] = encode_http7615_authinfo(h)
+            self.authz.modify_response_header(response, hdr)
 
     def setup_hooks(self, app):
         app.on_post_GET += self.post_hook

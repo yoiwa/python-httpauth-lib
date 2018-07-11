@@ -137,7 +137,7 @@ class DigestAuthenticator(BaseAuthenticator):
         session = self.nonce_cache.get(nonce)
 
         if not session:
-            return False, {'stale': True}
+            return False, RequestResponseState(stale=True)
         assert(session.nonce == nonce)
 
         if (opaque != self.opaque):
