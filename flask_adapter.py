@@ -24,41 +24,52 @@ class FlaskAuthWrapper:
     def __init__(self, authz):
         self.authz = authz
 
-    def _return_401(self, hdr=None, r=None, status=None):
-        chal = self.authz.generate_challenge(hdr)
-        hdr = {"WWW-Authenticate": encode_http7615_header(chal)} if chal != "" else {}
+    def _return_401(self, sessk=None, r=None, status=None):
+        chal = self.authz.generate_challenge(sessk)
+        header = {"WWW-Authenticate": encode_http7615_header(chal)} if chal != "" else {}
         if r == None:
             r = Unauthorized()
         r = r.get_response()
-        for k, v in hdr.items():
+        for k, v in header.items():
             r.headers[k] = v
         flask.abort(r)
 
     def authenticate(self, resource):
         auth_header = flask.request.headers.get('authorization')
-        def abort(reason, hdr):
+        def abort(reason, sessk):
             if reason == 401:
-                self._return_401(hdr=hdr)
+                self._return_401(sessk=sessk)
             else:
                 flask.abort(reason)
 
-        usr, hdr = self.authz.authenticate(
+        usr, sessk = self.authz.authenticate(
             resource, flask.request,
             auth_header = auth_header,
             abort=abort)
 
         flask.g.auth_value = usr
-        return hdr
+        return sessk
 
-    def modify_response_header(self, r, hdr):
-        h = self.authz.generate_auth_info(hdr, r)
+    def modify_response_header(self, r, sessk):
+        request = flask.request
+        # see werkzeug.wrappers.BaseRequest.get_app_iter()
+        empty_response = (request.method == 'HEAD' or
+                          r.status_code in (204, 304, 412))
+        # NO CONTENT: data may be b'{}' for somewhat reason. override.
+        if empty_response:
+            rbody_f = (lambda: b'')
+        else:
+            def rbody_f():
+                r.freeze()
+                return r.response
+        h = self.authz.generate_auth_info(sessk, rbody_f)
         if h != {}:
             r.headers['Authentication-Info'] = encode_http7615_authinfo(h)
 
-    def wrap_result(self, rv, hdr):
-        if hdr:
+    def wrap_result(self, rv, sessk):
+        if sessk:
             r = flask.make_response(rv)
-            self.modify_response_header(r, hdr)
+            self.modify_response_header(r, sessk)
             return r
         else:
             return rv
@@ -70,13 +81,13 @@ class FlaskAuthWrapper:
         def wrap(f):
             @wraps(f)
             def wrapped(*a, **k):
-                h = self.authenticate(resource)
+                sessk = self.authenticate(resource)
                 try:
                     r = f(*a, **k)
-                    return self.wrap_result(r, h)
+                    return self.wrap_result(r, sessk)
                 except Unauthorized as e:
                     if e.response == None:
-                        self._return_401(hdr=h, r=e)
+                        self._return_401(sessk=sessk, r=e)
                     raise
             return wrapped
         return wrap

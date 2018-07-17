@@ -214,12 +214,14 @@ class DigestAuthenticator(BaseAuthenticator):
         # print("GENERATE_CHALLENGE: {!r}".format(h))
         return [('Digest', h)]
 
-    def generate_auth_info(self, sessk, response):
+    # `rbody_f` is a function returning a iterative of
+    # byte sequence for the body.
+    # Not used if qop=auth.
+    def generate_auth_info(self, sessk, rbody_f):
         # print("GENERATE_AUTHINFO: {!r}".format(sessk))
 
         if(sessk.qop == 'auth-int'):
-            response.make_sequence()
-            body_iter = response.iter_encoded()
+            body_iter = rbody_f()
         else:
             body_iter = None
 
