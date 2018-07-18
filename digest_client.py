@@ -29,7 +29,7 @@ class DigestClientSession:
 class DigestAuth(requests.auth.AuthBase):
     # Logics for session resending and thread_local state management is
     # imported from requests/auth.py
-    # it is the only available "documentation" for "requests"-library internals.
+    # It is the only available "documentation" for "requests"-library internals.
 
     # others are reimplemented here for
     #  - SHA256 support,

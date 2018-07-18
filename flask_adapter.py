@@ -2,15 +2,33 @@
 # A part of httpauth_lib from the DOORMEN project.
 # (c) 2018 National Institute of Advanced Industrial Science and Technology.
 
-"""
-HTTP Authentication framework for Flask applications.
+"""HTTP Authentication framework for Flask applications.
 
 How to use:
+
  1) Instanciate an Authenticator class.
+
  2) Set it to an Authorization class.
- 3) Decorate application entry point by the authorization instance.
-    FlaskAuthWrapper is automatically enabled when authorization is
-    used for wrapping.
+
+ 3) Decorate application entry points by the authorization instance.
+    FlaskAuthWrapper is automatically enabled when authorization
+    instance is used for wrapping.
+
+ It would look like following:
+
+      authn = digest_auth.DigestAuthenticator(...)
+      authz = basic_handler.SimpleAuthorization(authn)
+
+      @app.route("/")
+      @authz("/")
+      def service():
+        ...
+
+      app.run(...)
+
+ In Flask adapter, `flask.abort(401)` can be used to reject
+ current authetication response from the client.
+
 """
 
 from functools import wraps

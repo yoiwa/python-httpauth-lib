@@ -2,23 +2,31 @@
 # A part of httpauth_lib from the DOORMEN project.
 # (c) 2018 National Institute of Advanced Industrial Science and Technology.
 
-"""
-HTTP Authentication adapter for httplib applications.
+"""HTTP Authentication adapter for httplib applications.
 
 How to use:
- 1) Instanciate an Authenticator class.
- 2) Set it to an Authorization class.
- 3) make Handlerclass inherited from AuthnHTTPRequestHandler,
-    or put AuthHTTPMixin in the "top of" superclass list.
- 4) call authenticate at the front of actions.
- 5) if it returned any false value,
-    simply return from the action.
 
-Steps 3-4 looks like following:
+ 1) Instanciate an Authenticator class.
+
+ 2) Set it to an Authorization class.
+
+ 3) make Handlerclass inherited from AuthnHTTPRequestHandler, or put
+    AuthHTTPMixin in the "top of" superclass list.
+
+ 4) call authenticate at the front of actions.
+
+ 5) if it returned any false value, simply return from the action.
+
+ Steps 1--2) would look like following:
+
+        authn = digest_auth.DigestAuthenticator(...)
+        authz = basic_handler.SimpleAuthorization(authn)
+
+ Steps 4--5) look like following:
+ 
         usr = self.authenticate(authz)
         if not usr:
             return
-
 
 """
 

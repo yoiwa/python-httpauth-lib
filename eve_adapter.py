@@ -2,8 +2,7 @@
 # A part of httpauth_lib from the DOORMEN project.
 # (c) 2018 National Institute of Advanced Industrial Science and Technology.
 
-"""
-HTTP Authentication wrappe for Eve applications.
+"""HTTP Authentication wrappe for Eve applications.
 
 How to use:
  1) Instanciate an Authenticator class.
@@ -12,15 +11,16 @@ How to use:
  4) pass it to Eve's "auth=" parameter.
  5) call setup_hooks with the eve-app as an argument.
 
- steps 3--5 is like below:
+ It would look like following:
 
-  authz = ...
+      authn = digest_auth.DigestAuthenticator(...)
+      authz = basic_handler.SimpleAuthorization(authn)
 
-  eve_auth = EveAuthentication(authz)
-  app = Eve(...other parameters..., auth=eve_auth)
-  eve_auth.setup_hooks(app)
+      eve_auth = EveAuthentication(authz)
+      app = Eve(..., auth=eve_auth)
+      eve_auth.setup_hooks(app)
 
-  app.run(...)
+      app.run(...)
 
 """
 
