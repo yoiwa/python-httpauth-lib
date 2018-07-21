@@ -85,8 +85,8 @@ class DigestAuthenticator(BaseAuthenticator):
 
     """
 
-    def __init__(self, algo, realm, checkerdic, idwrap=str, qops=['auth'], cache_params={}):
-        super().__init__('Digest')
+    def __init__(self, algo, realm, checkerdic, idwrap=str, qops=['auth'], cache_params={}, **kw):
+        super().__init__('Digest', **kw)
         self.algoname_lower = algo.lower()
         self.algo = hash_algorithms.get(self.algoname_lower)
         if not self.algo:
@@ -137,14 +137,17 @@ class DigestAuthenticator(BaseAuthenticator):
         session = self.nonce_cache.get(nonce)
 
         if not session:
+            self.logger.debug("authentication failed: no corresponding nonce found")
             return False, RequestResponseState(stale=True)
         assert(session.nonce == nonce)
 
         if (opaque != self.opaque):
+            self.logger.debug("authentication failed: opaque parameter mismatch")
             del self.nonce_cache[nonce]
             return False
 
         if (username not in self.dic): 
+            self.logger.debug("authentication failed: user not found")
             del self.nonce_cache[nonce]
             return False
            
@@ -195,6 +198,7 @@ class DigestAuthenticator(BaseAuthenticator):
             session=session, rspauth=rspauth, qop=qop,
             cnonce=cnonce, nc=nc)
 
+        self.logger.debug("authentication succeeded: username = {}".format(username))
         return (self.idwrap(username), sessk)
 
     def generate_challenge(self, sessk):

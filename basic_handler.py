@@ -128,7 +128,7 @@ class CombinedAuthenticator(BaseAuthenticator):
             for authn, hh in h[1]:
                 r.extend(authn.generate_challenge(hh))
         else:
-            r.extend(h[0].generate_challenge[h[1]])
+            r.extend(h[0].generate_challenge(h[1]))
         return r
 
     def generate_auth_info(self, hdr, resp):
