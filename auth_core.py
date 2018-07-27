@@ -129,6 +129,9 @@ class BaseAuthorization:
                 self.logger.debug("authentication failed")
                 authz = False
 
+        if authz and authz is not True:
+            usr = authz
+
         if not authz:
             if usr:
                 self.logger.debug("authorization failed")
