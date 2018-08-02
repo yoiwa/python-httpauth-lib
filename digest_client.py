@@ -181,18 +181,28 @@ class DigestAuth(MultihopAuthBase):
         else:
             raise ValueError
 
+    def __authinfo_error(self, msg, *args):
+        msg = msg.format(*args)
+        self.logger.error(msg)
+        if self.strict_auth:
+            raise ContentDecodingError(msg)
+        else:
+            warn(RequestsWarning(msg))
+
     def process_200(self, r, counts, **kwargs):
+        session = self.load_state()
+        assert(session is not None)
+
         if 'authentication-info' not in r.headers:
+            self.__authinfo_error('no Authentication-Info header in response')
             return
         try:
             auth_info = r.headers['authentication-info']
             auth_info = parse_http7615_authinfo(auth_info)
         except ValueError as e:
-            self.logger.error("parsing Authentication-Info: header failed: {}: {}.".format(auth_info, e))
+            self.__authinfo_error("parsing Authentication-Info: header failed: {}: {}.", auth_info, e)
             return
 
-        session = self.load_state()
-        assert(session is not None)
         svr_rspauth = session.last_req.respauth
         if session.last_req.qop == 'auth':
             e1 = svr_rspauth(None)
@@ -203,11 +213,7 @@ class DigestAuth(MultihopAuthBase):
             e1 = svr_rspauth(body)
             e2 = auth_info.get('rspauth', "<none>").lower()
         if e1 != e2:
-            msg = "Digest ressponse authentication failed: expected {}, returned {}".format(e1, e2)
-            if self.strict_auth:
-                raise ContentDecodingError(msg)
-            else:
-                warn(RequestsWarning(msg))
+            self.__authinfo_error("Digest ressponse authentication failed: expected {}, returned {}", e1, e2)
         else:
             pass
             #print("@@@ checking response authentication OK: {}".format(e1), file=sys.stderr)
