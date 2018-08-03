@@ -1,0 +1,3 @@
+exclude .gitignore
+exclude test/*
+exclude MANIFEST.in

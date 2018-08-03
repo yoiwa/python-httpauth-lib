@@ -1,8 +1,6 @@
 # local additions
-*.db
-*.db.yaml.dump
-*.db~
-*.db.yaml.dump~
+test
+MANIFEST
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
