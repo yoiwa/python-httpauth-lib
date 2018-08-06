@@ -20,7 +20,7 @@ LastReq = namedtuple('LastReq', ['nc', 'c_resp', 'qop', 'respauth'])
 
 class DigestClientSession(passive_datapool.PooledDataMixin):
     __slots__ = ['algorithm', 'qop', 'realm', 'nonce', 'nc', 'cnonce', 'opaque', 'last_req',
-                 *(x for x in passive_datapool.required_slot_names if x != '__weakref__')]
+                 *passive_datapool.required_slot_names_mixin]
 
     def __init__(self):
         pass
