@@ -30,10 +30,10 @@ class DataPool:
     using `get()`.
 
     Each leased data is internally associated to a referent object
-    `ref`, provided as an argument to `get`.  If the referent `ref` is
-    destroyed, the data will be automatically recraimed and returned
-    to the pool.  The data can also be returned to pool by calling
-    `DataPool.return_to_pool(data)`.
+    `ref`, provided as an argument to `get`.  If the referent is
+    discarded from memory, the data will be automatically recraimed
+    and returned to the pool.  The data can also be returned to pool
+    by calling `DataPool.return_to_pool(data)`.
 
     The referent object `ref` must be alive during the data is used.
     Other methods in this class must not be called on the data when
@@ -48,14 +48,16 @@ class DataPool:
     Methods regarding managed data are static methods: these are
     called like `DataPool.method(data, ...)`.
 
-    The pool is thread safe, and the managed data is also safe with
-    background GC behavior.  However, Explicit methods for a single
-    data must not be called concurrently, else the behavior is
-    undefined.
+    The leased data MUST NOT have a permanent strong reference to the
+    referent: circular dependency will eliminate possibility of
+    returning object to pool, and cause memory leaks (such garbage
+    cannot be collected by cycle-detecting GC.)  Having a weak
+    reference is fine.  DataPool.get_referent(data) will also work.
 
-    Note: the resource data is better not having a strong reference to
-    the referent, if possible: circular dependency may postpone
-    reclaiming data to next full-scanning GC.
+    The pool is thread safe, and the leased data is also safe with
+    background GC behavior.  However, Explicit methods for a single
+    leased data must not be called concurrently, otherwise the
+    behavior is undefined.
 
     """
 
@@ -206,6 +208,15 @@ class DataPool:
 
     kill = remove_from_pool
 
+    @staticmethod
+    def get_referent(d):
+        """Get a (strong) referece to the referent object
+        currently associated to the argument.
+        """
+
+        handle, ref, pool = DataPool._check_alive_leased_data(d)
+        return ref
+
     # internal methods
 
     @staticmethod
@@ -300,12 +311,15 @@ class PooledDataMixin:
     def replace_with(self, new):
         return DataPool.replace_data(self, new)
     def return_to_pool(self):
-        DataPool.finished(self)
+        return DataPool.return_to_pool(self)
     def remove_from_pool(self):
-        DataPool.kill(self)
+        return DataPool.kill(self)
+    def update_referent(self, new):
+        return DataPool.update_referent(self, new)
+    def get_referent(self):
+        return DataPool.get_referent(self)
 
-"""
-# Internal states:
+"""# Internal states:
 
 0: data not registered:
   __handle not defined
@@ -429,6 +443,45 @@ Actions and Events:
       __handle = DEAD
       [ now state 1D ]
 
+Reference graph:
+
+   _________________(expected)-------------
+  |                                        |
+  |          pool                          |
+  |            ^                           |
+  |            :                           |
+  v            :                           |
+ obj ------> handle ..................> referent
+  ^            | \                        ^ |
+  |            |  \___________________    : (virtually)
+  |            |                      |   : |
+   \           v                      v   : v
+    ----- refback_obj <------------- finalizer <----- (weakref module)
+
+  Solid lines represents strong references,
+  Dotted lines represents weak references.
+
+  - Strong references from finalizer to d will keep obj alive, even if
+    referent is dead.
+
+  - No strong reference to the referent: referent is expected to be
+    collected by reference-counting GC.
+
+  - There is a cycles around the obj, where link refback_obj->obj is
+    assumed to be a "back edge".
+
+  - The finalizer will cut the "back edge" to eliminate circular
+    reference. (obj->handle path is also cut in usual case.)
+
+  - Having a finalizer to the referent is virtually equivalent to
+    having a strong reference from referent to finalizer; So, if there
+    is a strong reference from obj to the referent, There causes a
+    virtual circular dependency between those.  Because obj is kept
+    alive for reclaiming, referent cannot be collected.
+
+    More over, GC cannot collect circular dependent garbages involving
+    finalizers, because it cannot know whether finalizer will
+    resurrect the object or not.
 
 """
 
