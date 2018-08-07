@@ -45,8 +45,8 @@ class DataPool:
     pattern cannot be used to reclaim a resource in case of abnormal
     exits.
 
-    Methods regarding managed data is static methods: these are called
-    like `DataPool.method(data, ...)`.
+    Methods regarding managed data are static methods: these are
+    called like `DataPool.method(data, ...)`.
 
     The pool is thread safe, and the managed data is also safe with
     background GC behavior.  However, Explicit methods for a single
@@ -161,6 +161,22 @@ class DataPool:
         return new
 
     @staticmethod
+    def update_referent(d, ref):
+        """Update referent object of d to ref.
+
+        Both old and new referent must be alive at this moment.
+        """
+        handle, old_ref, pool = DataPool._check_alive_leased_data(d)
+        # inhibit old finalizer
+
+        assert(old_ref)
+        assert(ref)
+        assert(handle.watch_target() == old_ref)
+        handle.finalizer.detach()
+        pool._setup_lease(d, ref, forced=True)
+        DataPool._clear_handle_content(handle, finalizer_detach=False)
+
+    @staticmethod
     def return_to_pool(d):
         """Return the data `d` immediately to the associated DataPool.
         """
@@ -217,8 +233,9 @@ class DataPool:
         except AttributeError:
             d.__handle = IN_POOL
 
-    def _setup_lease(self, d, ref):
-        assert(d.__handle == IN_POOL)
+    def _setup_lease(self, d, ref, forced=False):
+        if not forced:
+            assert(d.__handle == IN_POOL)
         refback_obj = [d]
         f = weakref.finalize(ref, DataPool._reclaim, refback_obj)
         f.atexit = False
