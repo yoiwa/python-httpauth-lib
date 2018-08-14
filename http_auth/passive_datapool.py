@@ -6,6 +6,8 @@ import weakref
 import threading
 import collections
 import types
+import sys
+
 wr = weakref.ref
 wr_None = lambda: None # pseudo weak reference to None or an expired object
 c_true = lambda x: True
@@ -14,6 +16,7 @@ __all__ = ['DataPool', 'PooledDataMixin']
 
 IN_POOL = [True]
 DEAD = [False]
+DEBUG = False
 
 class _Handle:
     __slots__ = ['watch_target', 'datapool', 'refback', 'finalizer']
@@ -22,6 +25,34 @@ class _Handle:
         self.datapool = datapool
         self.refback = refback
         self.finalizer = finalizer
+
+class _Rref(wr):
+    __slots__ = ('o', '__weakref__')
+    self_wr = None
+    def __new__(klass, ref, o):
+        def _cb(arg):
+            self = self_wr()
+            if self and self.o:
+                o = self.o
+                self.o = None
+                DataPool._reclaim(o)
+        self = weakref.ref.__new__(klass, ref, _cb)
+        self_wr = weakref.ref(self)
+        return self
+    def __init__(self, ref, o):
+        super().__init__(ref)
+        self.o = o
+    def __del__(self):
+        if self.o:
+            o = self.o
+            self.o = None
+            DataPool._reclaim_dead(o)
+    def detach(self):
+        # intentionally coincide name with weakref.finalize
+        self.o = None
+
+_identity = lambda x: x
+_ignore = lambda x: None
 
 class DataPool:
     """A data pool which will reclaim unused data in a passive manner.
@@ -52,43 +83,83 @@ class DataPool:
     referent: circular dependency will eliminate possibility of
     returning object to pool, and cause memory leaks (such garbage
     cannot be collected by cycle-detecting GC.)  Having a weak
-    reference is fine.  DataPool.get_referent(data) will also work.
+    reference is fine, or DataPool.get_referent(data) will serve as a
+    replacement.
+
+    Alternative approach (with a side effect) can be enabled with the
+    `gc_recovery` hook parameter.  See more description in the bottom
+    of the source code for more details and possible workarounds.
 
     The pool is thread safe, and the leased data is also safe with
-    background GC behavior.  However, Explicit methods for a single
-    leased data must not be called concurrently, otherwise the
+    background GC behavior.  However, methods working on a leased data
+    must not be called concurrently on a single data, otherwise the
     behavior is undefined.
 
     """
 
-    def __init__(self, *, factory=None):
-        """Create a data pool."""
+    def __init__(self, *, factory=None, type=None, gc_recovery=None):
+        """Create a data pool.
+
+        Optional Parameters:
+
+           `factory`: generator function for new data, used when the
+                      pool cannot serve request by existing data.
+
+           `type`: limit pooled data to subtype of the given type.
+
+           `gc_recovery`: hook for rescue from cyclic data condition.
+                See documentation in the bottom of the source code for
+                details.
+
+        """
         self._queue = collections.deque()
         self._lock = threading.Lock()
         self._factory = factory
+        self._type = type
+        self._gc_recovery = (_identity if gc_recovery == True else
+                             _ignore if gc_recovery == False else
+                             gc_recovery)
+        self._reclaimed = []
 
     # Public APIs
 
     def get(self, ref, pred=c_true, factory=None):
         """Retrieve one of stored data from pool.
 
-        parameters:
+        Parameters:
 
-          `ref`: the referent object to be tracked.  It must be
-                 weak-referencible.  If `ref` object vanishes, the
-                 retrieved data will automatically be returned to this
-                 pool.
+          `ref` (mandatory): the referent object to be tracked.  It
+                 must be weak-referencible.  If `ref` object vanishes,
+                 the retrieved data will automatically be returned to
+                 this pool.
 
-          `pred`: optional function to choose data to be retrieved.
+          `pred` (optional): predicate function to choose data to be
+                  retrieved.
 
-          `factory`: optional function returning new data when data is
-                     not available.  new data. If it is not supplied,
-                     `get()` will return None.  See `put()` for
-                     requirements on the data returned from factory.
+          `factory` (optional): function returning new data when
+                  existing data is not available. If it is not
+                  supplied for both `get()` and `DataPool()`, `get()`
+                  will return None.  See `put()` for requirements on
+                  the data returned from factory.
 
         """
 
         factory = factory or self._factory
+
+        if len(self._reclaimed) > 0:
+            while True:
+                # intentionally racing with producer _reclaim_dead():
+                # Both list.append and list.pop are atomic.
+                # Use of self._lock will cause deadlock inside GC.
+                l = []
+                try:
+                    l.append(self._reclaimed.pop())
+                except IndexError:
+                    break
+
+                for i in reversed(l):
+                    self._append_to_queue(i)
+
         with self._lock:
             d = None
             n = len(self._queue)
@@ -104,7 +175,9 @@ class DataPool:
                 d = factory()
             if d:
                 self._setup_lease(d, ref)
-            return d
+        if DEBUG:
+            print("data {} leased from pool {}".format(d, self))
+        return d
 
     def put(self, data):
         """Store a new data to pool.
@@ -112,21 +185,34 @@ class DataPool:
         The data must be an object having `__dict__`, or
         having `__slots__` of `DataPool.required_slot_names`."""
 
+        if (self._type and not isinstance(data, self._type)):
+            raise ValueError("Datapool accepts only {!s} but put {!s}".
+                             format(self._type, type(data)))
         self._check_cleanness(data)
         self._append_to_queue(data)
+        if DEBUG:
+            print("data {} put to pool {}".format(d, self))
 
     def put_and_use(self, data, ref):
-        """Register data to be used with the pool.
-        The data is already `leased out`: it can be used
-        in the current context.
+        """Register data to be used with the given pool.
 
-        It is mostly equivalent to put-get pair, but
-        it is ensured that the same data is always returned.
+        The data is already `leased out`: it can be used in the
+        current context.
 
-        The data has the same restriction as put."""
+        It is mostly equivalent to put-get pair, but `put_and_use`
+        ensures that the same data is always returned.
 
+        The data has the same restriction as put.
+
+        """
+
+        if (self._type and not isinstance(data, self._type)):
+            raise ValueError("Datapool accepts only {} but put {}".
+                             format(self._type, type(data)))
         self._check_cleanness(data)
         self._setup_lease(data, ref)
+        if DEBUG:
+            print("data {} put_and_use for pool {}".format(data, self))
         return data
 
     @staticmethod
@@ -166,7 +252,7 @@ class DataPool:
     def update_referent(d, ref):
         """Update referent object of d to ref.
 
-        Both old and new referent must be alive at this moment.
+        Both old and new referents must be alive at this moment.
         """
         handle, old_ref, pool = DataPool._check_alive_leased_data(d)
         # inhibit old finalizer
@@ -186,6 +272,8 @@ class DataPool:
         handle, ref, pool = DataPool._check_alive_leased_data(d)
         # inhibit finalizer
 
+        if DEBUG:
+            print("data {} returned to pool {}".format(d, pool))
         DataPool._clear_handle_content(handle)
         d.__handle = IN_POOL
 
@@ -217,11 +305,30 @@ class DataPool:
         handle, ref, pool = DataPool._check_alive_leased_data(d)
         return ref
 
+    # debug method
+
+    def __len__(self):
+        return len(self._queue) + len(self._reclaimed)
+
+    def __bool__(self):
+        return True
+
+    def _dump(self):
+        l = [*iter(self._queue), *iter(self._reclaimed)]
+        return("DataPool({!r})".format(l))
+
+    def _debug_peeklist(self):
+        l = [*iter(self._queue), *iter(self._reclaimed)]
+        return l
+
     # internal methods
 
     @staticmethod
     def _reclaim(refback):
-        # called as finalizer
+        # called either from finalizer or as weakref callback
+        if sys.is_finalizing():
+            # meaningless to return objects to pools upon exit
+            return
         d = refback[0]
         if not d: return
         handle = d.__handle
@@ -237,21 +344,64 @@ class DataPool:
             pool._append_to_queue(d)
 
     @staticmethod
-    def _check_cleanness(d):
+    def _reclaim_dead(refback):
+        # be careful: data is dead and we're in GC!
+        if sys.is_finalizing():
+            return
+        d = refback[0]
+        if not d: return
+        handle = d.__handle
+        if type(handle) is not _Handle: return
+
+        #assert(d.__handle.watch_target() == None)
+
+        # d is dead: if watch_target is live, it have lost a reference to d.
+        # It means that d is safe to be returned to pool.
+
+        pool = handle.datapool()
+        DataPool._clear_handle_content(handle, finalizer_detach=False)
+        d.__handle = IN_POOL
+
+        if not pool:
+            return
+
+        if pool._gc_recovery:
+            new_d = pool._gc_recovery(d)
+            if new_d:
+                pool._check_cleanness(new_d, in_pool_ok=True)
+                pool._reclaimed.append(new_d)
+            # We're inside GC!
+            # pool._append_to_queue is not useful because
+            # deque.append causes deadlock
+        else:
+            warnings.warn(UserWarning("DataPool: an object collected during cyclic garbage collection; discarded"))
+            # data is discarded
+
+    @staticmethod
+    def _check_cleanness(d, in_pool_ok=False):
         try:
             h = d.__handle
-            raise ValueError("data is already managed by DataPool")
+            if not in_pool_ok or h is not IN_POOL:
+                raise ValueError("data is already managed by DataPool")
         except AttributeError:
             d.__handle = IN_POOL
 
     def _setup_lease(self, d, ref, forced=False):
         if not forced:
-            assert(d.__handle == IN_POOL)
+            if not (d.__handle == IN_POOL):
+                raise ValueError("data was not in DataPool")
         refback_obj = [d]
-        f = weakref.finalize(ref, DataPool._reclaim, refback_obj)
-        f.atexit = False
+
+        if self._gc_recovery is None:
+            # we have recovery clue from dead zombie: use strict finalizer
+            r = wr(ref)
+            f = weakref.finalize(ref, DataPool._reclaim, refback_obj)
+        else:
+            # we have a recovery clue from dead zombie: use closed graph method
+            r = f = _Rref(ref, refback_obj)
+
         d.__handle = _Handle(
-            watch_target = wr(ref),
+            watch_target = r,
             datapool = wr(self),
             refback = refback_obj,
             finalizer = f)
@@ -445,43 +595,89 @@ Actions and Events:
 
 Reference graph:
 
-   _________________(expected)-------------
-  |                                        |
-  |          pool                          |
-  |            ^                           |
-  |            :                           |
-  v            :                           |
- obj ------> handle ..................> referent
-  ^            | \                        ^ |
-  |            |  \___________________    : (virtually)
-  |            |                      |   : |
-   \           v                      v   : v
-    ----- refback_obj <------------- finalizer <----- (weakref module)
+       _________________(expected)---------------
+      |                                          |
+      |         pool                             |
+      |           ^                              |
+      |           :                              |
+      v           :                              |
+     obj ----> handle ----> (weakref) .....> referent
+      ^           |         /                  ^ |
+      |           |        /(*A)           (*B): (virtually)
+      |           |       |                    : |
+       \          v       v       (*B)         : v
+        -------- refback_obj <-------------- finalizer <- (weakref module)
 
-  Solid lines represents strong references,
-  Dotted lines represents weak references.
+  Solid lines represent strong references, and
+  Dotted lines represent weak references.
+  References marked with (*A) exist when gc_recovery is enabled.
+  Those with (*B) exist when gc_recovery is not used.
 
-  - Strong references from finalizer to d will keep obj alive, even if
-    referent is dead.
+  - The refback_obj is referenced strongly from finalizer or weakref.
+    It will keep obj alive when referent is dying.  The callbacks will
+    reclaim the obj into pool before it is trashed.
 
   - No strong reference to the referent: referent is expected to be
     collected by reference-counting GC.
 
-  - There is a cycles around the obj, where link refback_obj->obj is
-    assumed to be a "back edge".
+  - There is a cycles around the obj.  It will be usually eliminated
+    during object reclaim by clearing refback_obj -> obj and obj ->
+    handle links.
 
-  - The finalizer will cut the "back edge" to eliminate circular
-    reference. (obj->handle path is also cut in usual case.)
+  - Having a finalizer is virtually equivalent to having a strong
+    reference from referent to the finalizer.
 
-  - Having a finalizer to the referent is virtually equivalent to
-    having a strong reference from referent to finalizer; So, if there
-    is a strong reference from obj to the referent, There causes a
-    virtual circular dependency between those.  Because obj is kept
-    alive for reclaiming, referent cannot be collected.
+    So, when gc_recovery is not used, if there is a strong reference
+    from obj to referent, there causes a virtual circular dependency
+    around obj: obj -> referent -> finalizer -> refback_obj -> obj.
+    Because obj is strongly kept alive by the finalizer for
+    reclaiming, referent cannot be collected by both reference
+    counting and mark-sweep GCs, resulting in memory leak.
 
-    More over, GC cannot collect circular dependent garbages involving
-    finalizers, because it cannot know whether finalizer will
-    resurrect the object or not.
+    Also, if there is other data to the same referent, those will also
+    be considered a part of cyclic objects (because it is internally
+    referenced from the referent).
+
+Use of `gc_recovery` hook parameter
+
+    When gc_recovery hook is enabled, such leased data with dependency
+    cycles can be collected by GC.  To enable that, the reference
+    structure is modified so that refback_obj is directly pointed from
+    the weak reference, not using the finalizer indirection.
+
+    When the whole cycle is collected by the mark-sweep GC, all
+    objects are instantly considered dead; an object finalizer
+    (__del__) associated to the weakref will be kicked and it will
+    resurrect obj to return the data to pools.  However, at this
+    moment, the object is already marked dead by GC.
+
+    Such marked-dead objects have some tricky behaviors: its
+    finalizers will not be called again, existing weakrefs to those
+    objects are eliminated, etc.  Such objects might be safe or unsafe
+    to be reused, depending on the situation.  It is the reason that
+    this hook is not enabled by default.
+
+    The `gc_recovery` hook is responsible to make such a dead object
+    useful again; the hook will receive a dead object, and assumed to
+    return a "clean" copy of it.  If non-null object is returned, it
+    will be returned back to the associated pool.  If the hook returns
+    None, the object is not resurrected.
+
+    Either `copy.copy` or `copy.deepcopy` can be used as `gc_recovery`
+    hook, depending on a situation.  Alternatively, if the data's
+    internal liveness does not cause any issues, `True` can be passed
+    to reuse the dead object as is.  `False` will silently discard the
+    dead.
+
+    It also have another side effect; if the referent has dropped all
+    strong references to the pooled-managed object before itself is
+    unreferenced, and the caller also lose the reference to the pooled
+    object (to be used for `return_to_pool`), the object will become
+    dead and collected by the GC, before the referent is collected.
+    The object have to be returned to pool via the tricky
+    `gc_recovery` path, instead of safer finalizer-based path.  This
+    is another reason that the pool uses the finalizer-based approach
+    by default.
 
 """
 
