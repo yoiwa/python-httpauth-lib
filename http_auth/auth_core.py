@@ -1,17 +1,16 @@
-# Core handler for HTTP Authentication.
+# Core logics for HTTP Authentication.
 # A part of httpauth_lib from the DOORMEN project.
 # (c) 2018 National Institute of Advanced Industrial Science and Technology.
 
-"""
-HTTP Authentication framework for Flask applications.
+"""HTTP Authentication framework core.
 
-How to use:
- 1) Instanciate an Authenticator class.
- 2) Set it to an Authorization class.
- 3) Decorate application entry point by the authorization instance.
+Implementation of the (almost) platform-independent handling for HTTP
+authentication and authorization.  It can either be used with adapters
+provided in this package (for Flask, Eve, http.server etc.), or be
+used as a foundation for implementing your own facility.
 
-Authenticator is more or less portable.
-Authorization is Flask-specific.
+If this core authorizer is used as a function decorator, it will
+behave as a Flask decorator (an adapter is automatically loaded).
 
 """
 

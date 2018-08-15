@@ -2,7 +2,7 @@
 # A part of httpauth_lib from the DOORMEN project.
 # (c) 2018 National Institute of Advanced Industrial Science and Technology.
 
-"""HTTP Authentication wrappe for Eve applications.
+"""HTTP Authentication adapter for Eve applications.
 
 How to use:
  1) Instanciate an Authenticator class.

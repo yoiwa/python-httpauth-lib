@@ -2,12 +2,20 @@
 # A part of httpauth_lib from the DOORMEN project.
 # (c) 2018 National Institute of Advanced Industrial Science and Technology.
 
+"""Handlers for relatively simple authentication schemes:
+
+Authenticators for Basic and Bearer authentication schemes, as well as
+an authenticator for multiple authentications are provided.
+The simplest implementation of an authorizer is also provided.
+
+"""
+
 from . import auth_core
 from .auth_core import BaseAuthenticator, BaseAuthorization
 from binascii import b2a_base64, a2b_base64
 
 class DictIdChecker:
-    __slots__ = ['dic']
+    __slots__ = ('dic')
 
     def __init__(self, dic):
         self.dic = dic
@@ -91,11 +99,11 @@ class CombinedAuthenticator(BaseAuthenticator):
     """Authenticator which combines several sub-authenticators
     passed to the constructor.
 
-    Note: many HTTP clients confuses with RFC-valid multiple
-    challanges sent from the Web servers.  For maximal
-    interoperability, "Basic" authenticator should be the first
-    authenticator.  Many "Digest"-scheme clients are simply
-    buggy enough on parsing mis-support multiple challenges.
+    Note: many HTTP clients confuse with RFC-valid multiple challanges
+    sent from the Web servers.  For maximal interoperability, "Basic"
+    authenticator should be the first authenticator.  Many
+    "Digest"-scheme clients are simply buggy enough on parsing to fail
+    support for multiple challenges.
 
     """
     def __init__(self, *authns):
