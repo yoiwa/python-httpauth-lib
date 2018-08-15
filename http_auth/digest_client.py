@@ -16,11 +16,11 @@ from .auth_http_header import encode_http7615_header, parse_http7615_header, par
 from . import passive_datapool
 import logging
 
-LastReq = namedtuple('LastReq', ['nc', 'c_resp', 'qop', 'respauth'])
+LastReq = namedtuple('LastReq', ('nc', 'c_resp', 'qop', 'respauth'))
 
-class DigestClientSession(passive_datapool.PooledDataMixin):
-    __slots__ = ['algorithm', 'qop', 'realm', 'nonce', 'nc', 'cnonce', 'opaque', 'last_req',
-                 *passive_datapool.required_slot_names_mixin]
+class DigestClientSession(passive_datapool.PooledDataBase):
+    __slots__ = ('algorithm', 'qop', 'realm', 'nonce',
+                 'nc', 'cnonce', 'opaque', 'last_req')
 
     def __init__(self):
         pass
@@ -32,7 +32,7 @@ class DigestAuth(MultihopAuthBase):
     #  - support for "nextnonce" and "stale" flags.
     #  - more rigid rfc7615 header parsing,
 
-    def __init__(self, username, password, qops=['auth'], realm=None, strict_auth=True, logger=None):
+    def __init__(self, username, password, qops=('auth',), realm=None, strict_auth=True, logger=None):
         super().__init__()
         self.username = username
         self.password = password
@@ -78,7 +78,7 @@ class DigestAuth(MultihopAuthBase):
                 nonce=session.nonce, nc=nc_str, cnonce=session.cnonce,
                 qop=session.qop, req_body=req_body)
             h = encode_http7615_header(
-                [('Digest',
+                (('Digest',
                   { 'algorithm': session.algorithm,
                     'qop': session.qop,
                     'realm': session.realm,
@@ -89,7 +89,7 @@ class DigestAuth(MultihopAuthBase):
                     'cnonce': session.cnonce,
                     'opaque': session.opaque,
                     'response': c_resp,
-            })])
+                  }),))
             session.last_req = LastReq(nc = session.nc,
                                        c_resp = c_resp,
                                        qop = session.qop,

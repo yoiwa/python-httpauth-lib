@@ -12,14 +12,15 @@ wr = weakref.ref
 wr_None = lambda: None # pseudo weak reference to None or an expired object
 c_true = lambda x: True
 
-__all__ = ['DataPool', 'PooledDataMixin']
+__all__ = ('DataPool', 'PooledDataMixin', 'PooledDataBase')
 
 IN_POOL = [True]
 DEAD = [False]
+
 DEBUG = False
 
 class _Handle:
-    __slots__ = ['watch_target', 'datapool', 'refback', 'finalizer']
+    __slots__ = ('watch_target', 'datapool', 'refback', 'finalizer')
     def __init__(self, watch_target, datapool, refback, finalizer):
         self.watch_target = watch_target
         self.datapool = datapool
@@ -71,7 +72,7 @@ class DataPool:
     the corresponding referent is lost.  It is OK to lose both ref and
     data at the same time, however.
 
-    This pool is useful when some resource is used with callbacks for
+    This class is useful when some resource is used with callbacks for
     some another library, and the usual `with` or `try-finally`
     pattern cannot be used to reclaim a resource in case of abnormal
     exits.
@@ -182,8 +183,11 @@ class DataPool:
     def put(self, data):
         """Store a new data to pool.
 
-        The data must be an object having `__dict__`, or
-        having `__slots__` of `DataPool.required_slot_names`."""
+        If stored data have slots restriction, it must either inherit
+        from `PooledDataBase` or have slots shown in
+        `DataPool.required_slot_names`.
+
+        """
 
         if (self._type and not isinstance(data, self._type)):
             raise ValueError("Datapool accepts only {!s} but put {!s}".
@@ -448,16 +452,23 @@ class DataPool:
         d = _NAMES()
         d.__handle = None
         r = wr(d)
-        return list(d.__dict__.keys())
+        return tuple(d.__dict__.keys())
 
-required_slot_names_mixin = DataPool._get_names()
-required_slot_names = DataPool._get_names() + ['__weakref__']
+DataPool.required_slot_names = DataPool._get_names() + ('__weakref__',)
+# may be used if __weakref__ already exists
+DataPool.required_slot_names_direct = DataPool._get_names()
+
+del DataPool._get_names
 
 class PooledDataMixin:
-    """Method mixin for data managed by DataPool.
+    """Mixin object for data managed by DataPool.
 
     Provides instance methods for managed data.
+    Classes importing this mixin must provide slot names
+    given in `DataPool.required_slot_names`.
     """
+
+    __slots__ = ()
     def replace_with(self, new):
         return DataPool.replace_data(self, new)
     def return_to_pool(self):
@@ -468,6 +479,14 @@ class PooledDataMixin:
         return DataPool.update_referent(self, new)
     def get_referent(self):
         return DataPool.get_referent(self)
+
+class PooledDataBase(PooledDataMixin):
+    """Base object for data managed by DataPool.
+
+    Using this class as a single base, required slots are
+    automatically maintained.
+    """
+    __slots__ = DataPool.required_slot_names
 
 """# Internal states:
 
