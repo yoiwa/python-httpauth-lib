@@ -10,14 +10,15 @@ How to use:
 
  2) Set it to an Authorization class.
 
- 3) Decorate application entry points by the authorization instance.
+ 3) Decorate application entry points by an authorization instance.
     FlaskAuthWrapper is automatically enabled when authorization
-    instance is used for wrapping.
+    instance is used as a function decorator.
 
  It would look like following:
 
       authn = digest_auth.DigestAuthenticator(...)
       authz = basic_handler.SimpleAuthorization(authn)
+      # authz = flask_adapter.FlaskAuthWrapper(authz)
 
       @app.route("/")
       @authz("/")
@@ -26,8 +27,9 @@ How to use:
 
       app.run(...)
 
- In Flask adapter, `flask.abort(401)` can be used to reject
- current authetication response from the client.
+ With Flask adapter, `flask.abort(401)` can be used in the application
+ to reject authorization of the current request from the client. An
+ appropriate `WWW-Authenticate` header will be returned to the client.
 
 """
 

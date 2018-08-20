@@ -26,7 +26,7 @@ class DigestClientSession(passive_datapool.PooledDataBase):
         pass
 
 class DigestAuth(MultihopAuthBase):
-    # complete reimplement for
+    # complete reimplementation of Digest authentication scheme with
     #  - SHA256 support,
     #  - rspauth support.
     #  - support for "nextnonce" and "stale" flags.

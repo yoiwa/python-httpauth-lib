@@ -64,13 +64,13 @@ class MultihopAuthBase(requests.auth.AuthBase):
         self.__tls.rid = id(r)
         # for sanity check, ignorable possibility of false negatives.
         # keeping r will cause memory-leak of whole request objects
-        # upon request failures (resulted in exceptions).
+        # upon request failures which has been resulted in exceptions.
 
         h = self.prepare_Authorization(r, counts=counts)
         if h:
             r.headers['Authorization'] = h
 
-        ### dirty trick (1):
+        ### dirty trick: very internal of requests-lib.
         try:
             self.__tls.pos = r.body.tell()
         except AttributeError:

@@ -13,9 +13,14 @@ How to use:
  3) make Handlerclass inherited from AuthnHTTPRequestHandler, or put
     AuthHTTPMixin in the "top of" superclass list.
 
- 4) call authenticate at the front of actions.
+ 4) call `authenticate()` at the front of actions.
 
- 5) if it returned any false value, simply return from the action.
+ 5) If authentication has been succeeded, `authenticate()` will return
+    an authenticated entity (usually a user name).
+
+    If it has returned a false value, authentication has been failed.
+    Simply return from the action then; a 401-status error is already
+    sent to the client.
 
  Steps 1--2) would look like following:
 

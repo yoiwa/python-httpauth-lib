@@ -8,7 +8,7 @@ How to use:
  1) Instanciate an Authenticator class.
  2) Set it to an Authorization class.
  3) Wrap the authorization object with EveAuthentication.
- 4) pass it to Eve's "auth=" parameter.
+ 4) pass it to Eve's ``auth`` parameter.
  5) call setup_hooks with the eve-app as an argument.
 
  It would look like following:
@@ -21,6 +21,10 @@ How to use:
       eve_auth.setup_hooks(app)
 
       app.run(...)
+
+ With Eve adapter, when authentication is succeeded, `authenticate()`
+ method can be called to make authorization failed, returning a
+ 401-status response with a `WWW-Authenticate` header.
 
 """
 
