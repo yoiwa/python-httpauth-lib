@@ -19,10 +19,14 @@ library is also included.  Adapting to other frameworks should be
 easy, provided that such framework can properly handle multi-hop HTTP
 authentication message flow.
 
-## Licensing
+## Copyright and license
+
+(c) 2018 National Institute of Advanced Industrial Science and Technology.
 
 Please refer to LICENSE file for details.  In short, it is
 Apache-license based.
+
+    [AIST program registration #H30PRO-2234]
 
 ## Acknowledgment
 
