@@ -9,7 +9,7 @@ How to use:
  2) Set it to an Authorization class.
  3) Wrap the authorization object with EveAuthentication.
  4) pass it to Eve's ``auth`` parameter.
- 5) call setup_hooks with the eve-app as an argument.
+ 5) Important: call setup_hooks with the eve-app as an argument.
 
  It would look like following:
 

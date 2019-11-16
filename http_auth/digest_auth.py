@@ -86,6 +86,43 @@ class DigestAuthenticator(BaseAuthenticator):
     """
 
     def __init__(self, algo, realm, checkerdic, idwrap=str, qops=['auth'], cache_params={}, **kw):
+        """Prepare Digest authentication for server-side resources.
+
+        Parameters:
+
+         - algo: a string representing the hash algorithm to be used.
+                 Valid values are MD5, SHA1, SHA-256, SHA-512, and
+                 any of those suffixed with "-sess".
+
+         - realm: a string representing an "authentication realm"
+                  provided from the server.
+
+         - checkerdic: a map from users to their passwords.  A dict or
+                       any class instances implementing an equivalent
+                       interface (accessed by []) will be accepted.
+
+         - idwrap: default `str`, meaning do-nothihg. An optional
+           function converting from user-names used by Digest
+           authentication to any internally-used identifiers.
+
+           One useful case is with CombinedAuthenticator in
+           basic_handler.py, to internally distinguish IDs for
+           different authtication schemes.
+
+         - cache_params: An optional dict to control behavior of
+           Internal nonce caches.  Used keys and default values are:
+
+           - 'entries': a maximum number of retained active nonces.
+                        Default: 1024.
+
+           - 'timeout': a maximum duration (in seconds) to retain
+                        unused, inactive nonces.  Default: 300 [sec].
+
+           - 'nc_max': a maximum accepted value for `nc` field of
+             Digest authentication, meaning how many requests can be
+             sent using the same nonce.  Default: 128.
+
+        """
         super().__init__('Digest', **kw)
         self.algoname_lower = algo.lower()
         self.algo = hash_algorithms.get(self.algoname_lower)

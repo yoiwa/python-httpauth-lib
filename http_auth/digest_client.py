@@ -2,6 +2,16 @@
 # A part of httpauth_lib from the DOORMEN project.
 # (c) 2018-2019 National Institute of Advanced Industrial Science and Technology.
 
+"""HTTP Authentication client for requests library.
+
+How to use:
+
+ 1) Instanciate DigestAuth class.
+
+ 2) Pass it to the `auth` parameter of `requests.get` or other functions.
+
+"""
+
 from collections import namedtuple
 #import sys
 import re
@@ -33,6 +43,43 @@ class DigestAuth(MultihopAuthBase):
     #  - more rigid rfc7615 header parsing,
 
     def __init__(self, username, password, qops=('auth',), realm=None, strict_auth=True, logger=None):
+        """Prepare Digest authentication for client-side access.
+
+        Parameters:
+
+         - username: a string representing the authenticating user.
+
+         - password: a string containing the password.
+
+         - qops: a qop setting to be accepted. A list or set
+                 containing 'auth', 'auth-int' or both.
+
+         - realm: a string compared with an "authentication realm"
+                  provided from the server. The value `None` means
+                  any server-provided realm will be accepted.
+
+         - strict_auth: default True; Specifies whether mutual
+                        authentication is enforced. If True,
+
+                        1) The client will reject any responses which
+                           is not authenticated by the Digest scheme.
+
+                        2) The response not containing server-side
+                           challenges nor Authentication-Info header
+                           will be rejected.
+
+                        3) The value of `rspauth` field from the
+                           server-sent Authentication-Info is checked,
+                           and any mismatched responses will be
+                           rejected.
+
+                        If set to False, the above conditions are
+                        warned but accepted.
+
+                        If set to a string "IGNORE", these conditions
+                        are silently accepted.
+
+        """
         super().__init__()
         self.username = username
         self.password = password
@@ -241,7 +288,7 @@ class DigestAuth(MultihopAuthBase):
                 e1 = svr_rspauth(body)
                 e2 = auth_info.get('rspauth', "<none>").lower()
             if e1 != e2:
-                self.__authinfo_error("Digest ressponse authentication failed: expected {}, returned {}", e1, e2)
+                self.__authinfo_error("Digest response authentication failed: expected {}, returned {}", e1, e2)
             else:
                 pass
                 #print("@@@ checking response authentication OK: {}".format(e1), file=sys.stderr)

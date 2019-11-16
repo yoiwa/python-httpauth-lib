@@ -35,7 +35,7 @@ class BasicAuthenticator(BaseAuthenticator):
 
         arguments:
           - realm: the realm string to be sent.
-          - checker: either a callable (passed user-id and passwird)
+          - checker: either a callable (passed user-id and password)
                      or a dict of {user-name: password}.
           - idwrap (optional): convert HTTP username to any object
             representing an authenticated identity.
