@@ -1,6 +1,6 @@
 # Client-side implementation of HTTP Digest authentication (including SHA-256)
 # A part of httpauth_lib from the DOORMEN project.
-# (c) 2018 National Institute of Advanced Industrial Science and Technology.
+# (c) 2018-2019 National Institute of Advanced Industrial Science and Technology.
 
 from collections import namedtuple
 #import sys
@@ -202,16 +202,23 @@ class DigestAuth(MultihopAuthBase):
     def __authinfo_error(self, msg, *args):
         msg = msg.format(*args)
         self.logger.error(msg)
-        if self.strict_auth:
+        if self.strict_auth == 'IGNORE':
+            pass
+        elif self.strict_auth:
             raise ContentDecodingError(msg)
         else:
             warn(RequestsWarning(msg))
 
     def process_200(self, r, counts, **kwargs):
         session = self.load_state()
-        self.save_state(None)
 
-        assert(session is not None)
+        if session is None:
+            # 200 is returned for initial request without challenge,
+            # 401 expected.
+            self.__authinfo_error('no Digest authentication ever requested by server')
+            return
+
+        self.save_state(None)
 
         try:
             if 'authentication-info' not in r.headers:
