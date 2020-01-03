@@ -1,19 +1,20 @@
-# DOORMEN httpauth-lib for Python
+# httpauth-lib for Python
 
 This is a fresh implementation of HTTP Digest and other authentication
-schemes.  This library supports various advanced features of HTTP
-authentication for which many existing libraries do not support:
+schemes for both server-side and client-side.  This library supports
+various advanced features of HTTP authentication for which many
+existing libraries do not support:
 
  - Multiple challenges as defined in RFC 7235.
  - Basic authentication scheme with UTF-8 support.
- - Advanced features of Digest authentication scheme:
+ - Digest authentication scheme with advanced features:
    - SHA-256 and SHA-256-sess algorithm (RFC 7616).
    - support for both qop=auth and qop=auth-int (RFC 7616).
    - UTF-8 support with proper multilingual header format (RFC 5987,
      required in RFC 7616).
 
 The library includes server-side support adapters for Flask and Eve
-framework, as well as that for `http.server` standard library in
+frameworks, as well as that for `http.server` standard library in
 Python.  Client-side support of Digest authentication for the
 `requests` library is also included.  Adapting to other frameworks
 should be easy, provided that such framework can properly handle
@@ -21,10 +22,10 @@ multi-hop HTTP authentication message flow.
 
 ## Copyright and license
 
-(c) 2018 National Institute of Advanced Industrial Science and Technology.
+(c) 2018-2019 National Institute of Advanced Industrial Science and Technology.
 
-Please refer to LICENSE file for details.  In short, it is
-Apache-license based.
+Please refer to LICENSE file for license details.  In shoft, the
+license is based on Apache Public License version 2.0.
 
     [AIST program registration #H30PRO-2234]
 
